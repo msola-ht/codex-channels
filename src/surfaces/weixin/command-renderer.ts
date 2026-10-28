@@ -8,6 +8,7 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   conversationCommandHelpLines,
+  conversationCommandQuickStartLines,
 } from "../conversation-command-help.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
@@ -76,6 +77,8 @@ export function renderWeixinHelp(): string {
   return toStructuredMarkdownList([
     "微信 Codex 命令",
     "普通文本会发送到当前 Codex Session。",
+    "",
+    ...conversationCommandQuickStartLines,
     ...conversationCommandHelpLines,
     "微信：",
     "- /whoami · /wx doctor",

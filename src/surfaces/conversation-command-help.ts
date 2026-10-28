@@ -1,103 +1,124 @@
 import type { ConversationCommandName } from "../application/index.js";
+import { surfaceCommandAliases } from "./slash-command.js";
+import { conversationCommandCatalog, isConversationCommandVisible } from "./conversation-command-catalog.js";
 
-export const conversationCommandDescriptions = {
-  resume: "列出或恢复 Codex 会话",
-  sessions: "搜索可恢复会话",
-  archived: "搜索已归档会话",
-  new: "下一条消息创建新会话",
-  archive: "归档当前会话",
-  unarchive: "恢复已归档会话",
-  pin: "固定当前会话",
-  unpin: "取消固定当前会话",
-  status: "查看当前会话状态",
-  workspace: "列出或切换 Workspace",
-  autoreview: "查看或切换当前会话审批方式",
-  stop: "停止当前任务",
-  queue: "管理 App Server 持久队列",
-  revert: "回退当前 Session 的分页历史",
-  rename: "命名当前会话",
-  compact: "压缩当前上下文",
-  fork: "分叉当前会话",
-  review: "启动代码审查",
-  model: "查看或切换模型",
-  effort: "查看或切换思考等级",
-  fast: "查看或切换 Standard、Fast、Ultrafast 速度",
-  skill: "查看或调用 Skill",
-  mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
-  plugin: "列出、查看或调用 Plugin",
-  hooks: "查看、审查、信任或启停 Hooks",
-  usage: "查看账号与当前 Session 用量；Ollama 支持时间切换与刷新",
-  metrics: "查看会话、聚合或异常请求指标",
-  limits: "查看套餐与额度",
-  permissions: "查看权限配置",
-  diff: "查看当前 Turn Diff",
-  plan: "切换 Plan 模式或直接开始规划",
-  goal: "查看或管理 Goal",
-  agents: "查看或调用子代理",
-  release: "查看或释放被占用的 Codex 会话",
-  schedule: "管理 Gateway 计划任务",
-} satisfies Record<ConversationCommandName, string>;
+export { conversationCommandDescriptions } from "./conversation-command-catalog.js";
 
-export const conversationCommandHelpSections = [
+type SurfaceCommandAlias = keyof typeof surfaceCommandAliases;
+type ConversationCommandAlias = {
+  [Alias in SurfaceCommandAlias]: typeof surfaceCommandAliases[Alias] extends ConversationCommandName
+    ? Alias
+    : never;
+}[SurfaceCommandAlias];
+
+interface HelpCommandUsage {
+  name: ConversationCommandName;
+  argumentsText: string;
+  alias?: ConversationCommandAlias;
+}
+
+interface HelpCommandLine {
+  commands: readonly HelpCommandUsage[];
+  description?: string;
+}
+
+interface HelpAliasLine {
+  alias: SurfaceCommandAlias;
+}
+
+function command(name: ConversationCommandName, argumentsText = ""): HelpCommandUsage {
+  return { name, argumentsText };
+}
+
+function aliasCommand(alias: ConversationCommandAlias, argumentsText = ""): HelpCommandUsage {
+  return { name: surfaceCommandAliases[alias], argumentsText, alias };
+}
+
+function line(...commands: HelpCommandUsage[]): HelpCommandLine {
+  return { commands };
+}
+
+const helpSections = [
   {
     title: "会话：",
     lines: [
-      "/resume [序号|名称|Session ID]",
-      "/sessions [页码] [filter all|running|pinned] [provider 名称] [search 搜索词]",
-      "/archived [页码] [filter all|pinned] [provider 名称] [search 搜索词]",
-      "/new · /archive · /unarchive <序号|名称|Session ID>",
-      "/pin · /unpin",
-      "/rename <名称> · /compact · /fork",
+      line(command("resume", "[序号|名称|Session ID]")),
+      line(command("sessions", "[页码] [filter all|running|pinned] [provider 名称] [search 搜索词]")),
+      line(command("archived", "[页码] [filter all|pinned] [provider 名称] [search 搜索词]")),
+      line(command("new"), command("archive"), command("unarchive", "<序号|名称|Session ID>")),
+      line(command("pin"), command("unpin")),
+      line(command("rename", "<名称>"), command("compact"), command("fork")),
     ],
   },
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称]",
-      { command: "/autoreview [on|off]", description: "（当前会话后续轮次）" },
-      "/stop · /queue add <文本> · /queue list [页码]",
-      "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
-      "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",
-      "/revert list [页码] · /revert <Turn ID 或列表序号> · /revert confirm <一次性令牌>",
-      "/review [branch <分支>|commit <SHA>|custom <说明>]",
-      "/diff",
-      "/release · /release force",
-      "/schedule list · /schedule runs <任务> [页码]",
-      "/schedule add <interval|once|monthly|daily|weekdays|weekly> ... · /schedule pause|resume|run|delete <任务>",
-      "/plan [规划需求] · /goal [set <目标>|clear]",
+      line(command("status"), command("workspace", "[序号|ID|名称]")),
+      { ...line(command("autoreview", "[on|off]")), description: "（当前会话后续轮次）" },
+      line(command("stop"), command("queue", "add <文本>"), command("queue", "list [页码]")),
+      line(command("queue", "update <完整 ID 或列表序号> <文本>"), command("queue", "delete <完整 ID 或列表序号>")),
+      line(command("queue", "reorder <完整 ID 或列表序号> <目标位置>"), command("queue", "start [完整 ID 或列表序号]")),
+      line(command("revert", "list [页码]"), command("revert", "<Turn ID 或列表序号>"), command("revert", "confirm <一次性令牌>")),
+      line(command("review", "[branch <分支>|commit <SHA>|custom <说明>]")),
+      line(command("diff")),
+      line(command("release"), command("release", "force")),
+      line(command("schedule", "list"), command("schedule", "runs <任务> [页码]")),
+      line(command("schedule", "add <interval|once|monthly|daily|weekdays|weekly> ..."), command("schedule", "pause|resume|run|delete <任务>")),
+      line(command("plan", "[规划需求]"), command("goal", "[set <目标>|clear]")),
     ],
   },
   {
     title: "模型与能力：",
     lines: [
-      "/model [提供商序号或 ID|模型序号、ID 或名称|clear]",
-      "/effort [序号|档位] · /fast [on|ultrafast|off|status]",
-      "/skill · /skills [名称或序号 任务]",
-      "/agents [角色名称或序号 任务]",
-      "/mcp [名称或序号]",
-      "/mcp health · /mcp reload",
-      "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
-      "/mcp login <名称或序号>",
-      "/mcp resource <名称或序号> <URI>",
-      "/plugin · /plugin health · /plugin list [页码] [search <关键词>]",
-      "/plugin <名称、完整 ID 或序号> [任务]",
-      "/hooks [page N|列表选择标识]",
-      "/hooks trust|enable|disable <列表选择标识> · /hooks confirm <一次性令牌>",
-      "/usage · /limits · /permissions",
-      "/limits reset [页码] · /limits reset use <券ID> · /limits reset confirm|cancel <令牌>",
-      "/metrics session",
-      "/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]",
+      line(command("model", "[提供商序号或 ID|模型序号、ID 或名称|clear]")),
+      line(command("effort", "[序号|档位]"), command("fast", "[on|ultrafast|off|status]")),
+      line(command("skill"), aliasCommand("skills", "[名称或序号 任务]")),
+      line(command("agents", "[角色名称或序号 任务]")),
+      line(command("mcp", "[名称或序号]")),
+      line(command("mcp", "health"), command("mcp", "reload")),
+      line(command("mcp", "<名称或序号> <tools|resources|templates> [页码] [search <关键词>]")),
+      line(command("mcp", "login <名称或序号>")),
+      line(command("mcp", "resource <名称或序号> <URI>")),
+      line(command("plugin"), command("plugin", "health"), command("plugin", "list [页码] [search <关键词>]")),
+      line(command("plugin", "<名称、完整 ID 或序号> [任务]")),
+      line(command("hooks", "[page N|列表选择标识]")),
+      line(command("hooks", "trust|enable|disable <列表选择标识>"), command("hooks", "confirm <一次性令牌>")),
+      line(command("usage"), command("limits"), command("permissions")),
+      line(command("limits", "reset [页码]"), command("limits", "reset use <券ID>"), command("limits", "reset confirm|cancel <令牌>")),
+      line(command("metrics", "session")),
+      line(command("metrics", "<global|providers|models|errors> [24h|7d|30d|90d|all]")),
     ],
   },
   {
     title: "快捷命令：",
     lines: [
-      "/h → /help",
-      "/work → /workspace",
-      "/r → /resume",
+      { alias: "h" },
+      { alias: "work" },
+      { alias: "r" },
     ],
   },
-] as const;
+] as const satisfies readonly {
+  title: string;
+  lines: readonly (HelpCommandLine | HelpAliasLine)[];
+}[];
+
+/** 保留既有帮助出口，命令文本只从结构化片段生成。 */
+export const conversationCommandHelpSections = helpSections.map((section) => ({
+  title: section.title,
+  lines: section.lines.flatMap((helpLine) => {
+    if ("alias" in helpLine) {
+      return [`/${helpLine.alias} → /${surfaceCommandAliases[helpLine.alias]}`];
+    }
+    const visible = helpLine.commands.filter(usage => isConversationCommandVisible(usage.name));
+    if (visible.length === 0) return [];
+    const command = visible.map((usage) =>
+      `/${usage.alias ?? usage.name}${usage.argumentsText.length > 0 ? ` ${usage.argumentsText}` : ""}`,
+    ).join(" · ");
+    return [helpLine.description === undefined
+      ? command
+      : { command, description: helpLine.description }];
+  }),
+}));
 
 /** 帮助生成处声明命令与说明的边界，渠道只负责已知命令的排版。 */
 export function formatConversationCommandHelpLines(
@@ -113,3 +134,11 @@ export function formatConversationCommandHelpLines(
 }
 
 export const conversationCommandHelpLines = formatConversationCommandHelpLines();
+
+/** A shared discovery summary; channel renderers still own placement and markup. */
+export const conversationCommandQuickStartLines = [
+  "常用入口：",
+  ...(["status", "stop", "new", "resume", "workspace", "model"] as const)
+    .map(name => `- ${conversationCommandCatalog[name].label}：/${name}`),
+  "",
+];

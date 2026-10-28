@@ -5,7 +5,7 @@ import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostic
 import {
   conversationCommandNames,
 } from "../../application/index.js";
-import { conversationCommandDescriptions } from "../conversation-command-help.js";
+import { conversationCommandCatalog, isConversationCommandVisible } from "../conversation-command-catalog.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -17,9 +17,9 @@ export function telegramConversationCommandName(name: string): string {
 
 const commands = [
   { command: "start", description: "使用说明" },
-  ...conversationCommandNames.map((name) => ({
+  ...conversationCommandNames.filter(isConversationCommandVisible).map((name) => ({
     command: telegramConversationCommandName(name),
-    description: conversationCommandDescriptions[name],
+    description: conversationCommandCatalog[name].description,
   })),
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
@@ -413,6 +413,7 @@ export function isTelegramEmergencyStopUpdate(
   update: Parameters<Bot["handleUpdate"]>[0],
   bot: Pick<Bot, "api" | "botInfo">,
 ): boolean {
+  if (update.callback_query?.data === "help:stop") return true;
   const context = new Context(update, bot.api, bot.botInfo);
   return Context.has.command("stop")(context) && String(context.match).trim().length === 0;
 }

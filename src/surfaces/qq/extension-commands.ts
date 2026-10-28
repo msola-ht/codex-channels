@@ -65,16 +65,16 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
   switch (result.kind) {
     case "skills": {
       if (!paginate(result.entries.length, "skill", "")) return;
-      choices.unshift(...result.entries.slice((page - 1) * 8, page * 8).flatMap(skill => skill.invocable === true ? taskChoice("skill", skill.name, skill.name) : []));
+      choices.unshift(...result.entries.slice((page - 1) * 8, page * 8).flatMap((skill, index) => skill.invocable === true ? taskChoice("skill", `${index + 1} ${skill.name}`, skill.name) : []));
       return { detail: `第 ${page} 页 · 共 ${result.entries.length} 项\n${formatConversationSkills({ ...result, entries: result.entries.slice((page - 1) * 8, page * 8) }, true)}\n使用 /skill，依次填写完整名称和任务；本页序号仅用于展示。`, choices };
     }
     case "agents": {
       if (!paginate(result.roles.length, "agents", "")) return;
-      choices.unshift(...result.roles.slice((page - 1) * 8, page * 8).flatMap(role => taskChoice("agents", role.name, role.name)));
+      choices.unshift(...result.roles.slice((page - 1) * 8, page * 8).flatMap((role, index) => taskChoice("agents", `${index + 1} ${role.name}`, role.name)));
       return { detail: `第 ${page} 页 · 共 ${result.roles.length} 项\n${formatConversationAgents({ ...result, roles: result.roles.slice((page - 1) * 8, page * 8) }, true)}\n使用 /agents，依次填写完整角色名称和任务；本页序号仅用于展示。`, choices };
     }
     case "plugins": {
-      result.plugins.forEach((plugin, index) => choices.push({ label: plugin.displayName, command: "plugin", input: result.selectors[index]!, expectedName: plugin.id }));
+      result.plugins.forEach((plugin, index) => choices.push({ label: `${result.selectors[index]} ${plugin.displayName}`, command: "plugin", input: result.selectors[index]!, expectedName: plugin.id }));
       const suffix = result.searchTerm ? ` search ${result.searchTerm}` : "";
       if (result.page > 1) choices.push({ label: "上一页", command: "plugin", input: `list ${result.page - 1}${suffix}` });
       if (result.page < result.pageCount) choices.push({ label: "下一页", command: "plugin", input: `list ${result.page + 1}${suffix}` });
@@ -90,7 +90,7 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
     case "mcp": {
       if (!paginate(result.servers.length, "mcp", "")) return;
       const servers = result.servers.slice((page - 1) * 8, page * 8);
-      choices.unshift(...servers.map((server, index) => ({ label: server.name, command: "mcp" as const,
+      choices.unshift(...servers.map((server, index) => ({ label: `${(page - 1) * 8 + index + 1} ${server.name}`, command: "mcp" as const,
         input: String((page - 1) * 8 + index + 1), expectedName: server.name })));
       // Display authoritative global indices, not page-local command selectors.
       const detail = `MCP 第 ${page} 页 · 共 ${result.servers.length} 项\n${formatConversationMcp({ kind: "mcp", servers }, (page - 1) * 8)}`;

@@ -25,6 +25,7 @@ import {
 import type { FeishuCardAction } from "./card-action.js";
 import { FeishuExpiredCardActions } from "./card-action-expiry.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
+import { conversationMenuAction } from "../conversation-command-catalog.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -34,6 +35,8 @@ export const feishuCommandMenuEventKey = "codexc_home";
 
 const feishuLocalCommandActions = [
   "help",
+  "home",
+  "choices-page",
   "whoami",
   "feishu-status",
   "feishu-doctor",
@@ -62,24 +65,6 @@ const directStateChangingActions = new Set<FeishuCommandCenterAction>([
   "plan",
 ]);
 
-export const feishuCommandCenterActions = [
-  "new",
-  "resume",
-  "status",
-  "fast",
-  "usage",
-  "metrics",
-  "limits",
-  "model",
-  "effort",
-  "workspace",
-  "goal",
-  "plan",
-  "schedule",
-  "hooks",
-  "help",
-] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
-
 export type FeishuCommandCenterActionResult =
   | "accepted"
   | "ignored"
@@ -90,10 +75,12 @@ export interface FeishuCommandCenterChoices {
   title: string;
   description?: string;
   descriptionFormat?: "plain_text" | "lark_md" | "markdown";
+  selectPage?: (page: number) => FeishuCommandCenterChoices;
   choices: ReadonlyArray<{
     label: string;
     action: FeishuCommandCenterAction;
     input: string;
+    style?: "primary" | "danger";
     acceptedState?: FeishuCommandAcceptedState;
     modelSelection?: ModelSelectionRequest;
   }>;
@@ -133,6 +120,7 @@ interface PendingCommandCenter {
   allowedSelections: ReadonlySet<string>;
   acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState>;
   modelSelections: ReadonlyMap<string, ModelSelectionRequest>;
+  selectPage?: (page: number) => FeishuCommandCenterChoices;
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
   limitsQueryInFlight?: boolean;
@@ -205,9 +193,15 @@ export class FeishuCommandCenter {
     response: FeishuCommandCenterResponse,
     assertActive?: () => void,
     replaceMessageId?: string,
+    expiresAt?: number,
   ): Promise<void> {
     const responseGuard = "choices" in response ? response.assertActive : undefined;
-    const guard = assertActive || responseGuard ? (): void => { assertActive?.(); responseGuard?.(); } : undefined;
+    const guard = assertActive || responseGuard || expiresAt !== undefined ? (): void => {
+      assertActive?.(); responseGuard?.();
+      if (expiresAt !== undefined && expiresAt <= this.now()) {
+        throw new UserFacingError("command.authorization-changed", "选择卡片已过期，请重新打开");
+      }
+    } : undefined;
     return this.openCard(
       target,
       actorId,
@@ -240,6 +234,8 @@ export class FeishuCommandCenter {
         : new Map(),
       guard,
       responseGuard,
+      "choices" in response ? response.selectPage : undefined,
+      expiresAt,
     );
   }
 
@@ -300,6 +296,8 @@ export class FeishuCommandCenter {
     modelSelections: ReadonlyMap<string, ModelSelectionRequest> = new Map(),
     assertActive?: () => void,
     selectionGuard?: () => void,
+    selectPage?: (page: number) => FeishuCommandCenterChoices,
+    expiresAt?: number,
   ): Promise<void> {
     assertActive?.();
     if (
@@ -330,10 +328,11 @@ export class FeishuCommandCenter {
       target,
       actorId,
       messageId,
-      expiresAt: this.now() + tokenTtlMs,
+      expiresAt: Math.min(this.now() + tokenTtlMs, expiresAt ?? Infinity),
       allowedSelections: collectCommandSelections(card, token),
       acceptedStates,
       modelSelections,
+      ...(selectPage ? { selectPage } : {}),
       ...(form ? { form } : {}),
       consumeOnUse,
       ...(selectionGuard ? { assertActive: selectionGuard } : {}),
@@ -501,7 +500,15 @@ export class FeishuCommandCenter {
     void this.track(
       (async () => {
         try {
-          if (resolvedCommand === "help") {
+          if (resolvedCommand === "choices-page") {
+            if (!pending.selectPage) {
+              throw new UserFacingError("command.unsupported", "当前卡片不支持翻页");
+            }
+            await this.openResponse(pending.target, pending.actorId,
+              pending.selectPage(Number(submittedInput)), pending.assertActive, undefined, pending.expiresAt);
+          } else if (resolvedCommand === "home") {
+            await this.open(pending.target, pending.actorId);
+          } else if (resolvedCommand === "help") {
             await this.openCard(
               pending.target,
               pending.actorId,
@@ -631,7 +638,7 @@ function renderFeishuCommandChoicesCard(
         row.map((choice) => [
           truncateChoiceLabel(choice.label),
           choice.action,
-          "default",
+          choice.style ?? "default",
           choice.input,
         ]),
       )
@@ -646,11 +653,11 @@ function cardKitChoiceRows(
   token: string,
   choices: ReadonlyArray<FeishuCommandCenterChoices["choices"][number]>,
 ): Array<Record<string, unknown>> {
-  return chunkChoices(choices, 3).map((row, rowIndex) =>
-    feishuCardColumnSetRow(row.map((choice, columnIndex) =>
+  return chunkChoices(choices, 3).map((row) =>
+    feishuCardColumnSetRow(row.map((choice) =>
       feishuCardButton(
         truncateChoiceLabel(choice.label),
-        rowIndex === 0 && columnIndex === 0 ? "primary" : "default",
+        choice.style ?? "default",
         commandValue(token, choice.action, choice.input),
       )
     ))
@@ -724,45 +731,48 @@ function renderFeishuCategorizedCommandsCard(
   token: string,
 ): FeishuCardDocument {
   return feishuCardShell("blue", "更多 Codex 命令", [
-    sectionTitle("会话查询"),
+    sectionTitle("会话管理"),
     actionRow(token, [
-      ["会话列表", "sessions", "primary"],
-      ["已归档", "archived", "default"],
-    ]),
-    sectionTitle("会话操作"),
-    actionRow(token, [
-      ["停止任务", "stop", "default"],
-      ["归档当前", "archive", "default"],
-      ["压缩上下文", "compact", "default"],
+      menuAction("sessions"),
+      menuAction("archived"),
     ]),
     actionRow(token, [
-      ["分叉会话", "fork", "default"],
-      ["重命名", "rename", "default"],
-      ["App Server Queue", "queue", "default"],
-      ["释放占用", "release", "default"],
+      menuAction("archive"),
+      menuAction("rename"),
+      menuAction("fork"),
     ]),
     actionRow(token, [
-      ["固定会话", "pin", "default"],
-      ["取消固定", "unpin", "default"],
-      ["历史回退", "revert", "default"],
+      menuAction("pin"),
+      menuAction("unpin"),
+      menuAction("compact"),
+    ]),
+    sectionTitle("任务工具"),
+    actionRow(token, [
+      menuAction("plan", "切换 Plan 模式"),
+      menuAction("schedule"),
     ]),
     actionRow(token, [
-      ["计划任务", "schedule", "default"],
+      menuAction("revert"),
+    ]),
+    actionRow(token, [
+      menuAction("diff"),
+      menuAction("review"),
     ]),
     sectionTitle("能力与集成"),
     actionRow(token, [
-      ["子代理", "agents", "default"],
-      ["Skills", "skill", "default"],
-      ["MCP", "mcp", "default"],
-      ["Plugin", "plugin", "default"],
-      ["Hooks", "hooks", "default"],
+      menuAction("agents"),
+      menuAction("skill"),
+      menuAction("mcp"),
     ]),
-    sectionTitle("当前内容"),
     actionRow(token, [
-      ["当前会话审批方式", "autoreview", "default"],
-      ["权限查询", "permissions", "default"],
-      ["Diff", "diff", "default"],
-      ["Review", "review", "default"],
+      menuAction("plugin"),
+      menuAction("hooks"),
+    ]),
+    sectionTitle("权限与诊断"),
+    actionRow(token, [
+      menuAction("autoreview"),
+      menuAction("permissions"),
+      menuAction("release"),
     ]),
     sectionTitle("飞书"),
     actionRow(token, [
@@ -770,7 +780,8 @@ function renderFeishuCategorizedCommandsCard(
       ["飞书状态", "feishu-status", "default"],
       ["Doctor", "feishu-doctor", "default"],
     ]),
-    feishuCardPlainText("带文本参数的命令将在下一步打开输入卡片。"),
+    feishuCardPlainText("重命名和 Review 打开输入或选项；点击“切换 Plan 模式”会直接请求切换。发送 /help 返回命令中心。"),
+    actionRow(token, [["返回首页", "home", "default"]]),
   ]);
 }
 
@@ -779,34 +790,41 @@ export function renderFeishuCommandCenterCard(
 ): FeishuCardDocument {
   return feishuCardShell("blue", "Codex 命令中心", [
     feishuCardPlainText("选择操作；普通文本仍会发送到当前 Codex Session。"),
-    sectionTitle("常用"),
+    sectionTitle("当前任务"),
     actionRow(token, [
-      ["新会话", "new", "primary"],
-      ["会话切换", "resume", "default"],
-      ["当前状态", "status", "default"],
+      menuAction("status"),
+      menuAction("stop"),
+      menuAction("new"),
     ]),
+    sectionTitle("会话与工作区"),
     actionRow(token, [
-      ["速度", "fast", "primary"],
-      ["账户用量", "usage", "default"],
-      ["请求指标", "metrics", "default"],
-      ["额度", "limits", "default"],
+      menuAction("resume", "恢复会话"),
+      menuAction("workspace"),
     ]),
-    sectionTitle("模型与工作区"),
+    sectionTitle("模型设置"),
     actionRow(token, [
-      ["模型设置", "model", "default"],
-      ["思考等级", "effort", "default"],
-      ["工作区", "workspace", "default"],
+      menuAction("model", "选择模型"),
+      menuAction("effort"),
+      menuAction("fast", "Fast"),
     ]),
+    sectionTitle("用量与账户"),
     actionRow(token, [
-      ["Goal", "goal", "default"],
-      ["Plan 模式", "plan", "default"],
-      ["计划任务", "schedule", "default"],
+      menuAction("usage"),
+      menuAction("metrics"),
+      menuAction("limits", "账户额度"),
     ]),
     sectionTitle("更多"),
     actionRow(token, [
-      ["帮助与更多命令", "help", "default"],
+      ["更多操作", "help", "default"],
     ]),
   ]);
+}
+
+/** Static canonical entries only; forms, navigation and allowed selections remain card-owned. */
+function menuAction(command: ConversationCommandName, label?: string):
+  readonly [string, ConversationCommandName, "default"] {
+  const entry = conversationMenuAction(command);
+  return [label ?? entry.label, entry.command, "default"];
 }
 
 function sectionTitle(title: string): Record<string, unknown> {
@@ -818,7 +836,7 @@ function actionRow(
   actions: ReadonlyArray<readonly [
     label: string,
     action: FeishuCommandCenterAction,
-    type: "primary" | "default",
+    type: "primary" | "default" | "danger",
     input?: string,
   ]>,
 ): Record<string, unknown> {
@@ -858,9 +876,13 @@ function chunkChoices<T>(
 
 function truncateChoiceLabel(value: string): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length > 32
-    ? `${normalized.slice(0, 31)}…`
-    : normalized;
+  if (normalized.length <= 32) return normalized;
+  let prefix = "";
+  for (const character of normalized) {
+    if (prefix.length + character.length > 31) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
 }
 
 function isCommandCenterAction(

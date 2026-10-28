@@ -202,7 +202,7 @@ export type ConversationCommandResult =
       view: "diff";
       artifacts: ReturnType<ConversationCommandUseCases["artifacts"]>;
     }
-  | { kind: "goal"; goal: ThreadGoal | null }
+  | { kind: "goal"; threadId: string; goal: ThreadGoal | null }
   | { kind: "agents"; roles: Awaited<ReturnType<ConversationCommandUseCases["listAgentRoles"]>> }
   | {
       kind: "occupancy";
@@ -720,14 +720,21 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return modelSelectionResult(state);
       }
-      case "effort":
+      case "effort": {
+        let state = argumentsText
+          ? await this.conversations.selectEffort(target, argumentsText, assertAuthorized)
+          : await this.conversations.modelState(target, assertAuthorized);
+        // Effort belongs to the selected model, not a different Provider's
+        // browse-only directory. Reuse the existing browse reset and fresh read.
+        if (state.providerFilter !== undefined && state.providerFilter !== state.modelProvider) {
+          state = await this.conversations.clearModelBrowse(target, assertAuthorized);
+        }
         return {
           kind: "models",
           view: "effort",
-          state: argumentsText
-            ? await this.conversations.selectEffort(target, argumentsText, assertAuthorized)
-            : await this.conversations.modelState(target, assertAuthorized),
+          state,
         };
+      }
       case "fast":
         return {
           kind: "models",
@@ -1199,8 +1206,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "Goal 参数无效",
       );
     }
-    const goal = await this.conversations.getGoal(target, assertAuthorized);
-    return { kind: "goal", goal };
+    const result = await this.conversations.getGoal(target, assertAuthorized);
+    return { kind: "goal", ...result };
   }
 }
 

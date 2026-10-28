@@ -38,11 +38,13 @@ import type {
 } from "../types.js";
 import {
   conversationCommandHelpLines,
+  conversationCommandQuickStartLines,
 } from "../conversation-command-help.js";
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -60,6 +62,8 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
+  telegramHelpCommand,
+  telegramHelpKeyboard,
   threadAutoReviewKeyboard,
   scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
@@ -569,37 +573,48 @@ export class TelegramSurface {
   }
 
   private registerHandlers(): void {
+    const commandNames = (name: string): string[] => [
+      telegramConversationCommandName(name),
+      ...Object.entries(surfaceCommandAliases)
+        .filter(([, command]) => command === name)
+        .map(([alias]) => telegramConversationCommandName(alias)),
+    ];
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
-    this.bot.command(["start", "help", "h"], (context) =>
-      replyTelegramPanel(
-        context,
-        [
-          "## Codex Connect Gateway",
-          "",
-          "普通文本会发送到当前 Codex Session。",
-          "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
-          "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
-          "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
-          "没有绑定会话时会新建会话；继续历史会话请使用 /resume 显式选择。",
-          "",
-          ...conversationCommandHelpLines,
-          "Telegram：",
-          "- /whoami",
-          "- /start · /help · /h",
-        ].join("\n"),
-      ),
-    );
+    this.bot.command(["start", ...commandNames("help")], context => this.renderHelp(context, "home"));
+    this.bot.callbackQuery(/^help:([a-z]+)$/, async context => {
+      const action = context.match[1]!;
+      if (action === "home" || action === "more" || action === "guide") {
+        await context.answerCallbackQuery();
+        await this.renderHelp(context, action);
+        return;
+      }
+      const command = telegramHelpCommand(action);
+      if (!command) throw new UserFacingError("command.unsupported", "该帮助按钮不支持此操作，请重新发送 /help");
+      if (command === "stop") {
+        // Attachment cancellation was registered in platform receive order.
+        // A failed/slow callback ACK must not prevent the original /stop.
+        const cancelledInteraction = this.interactions.stopForChat(target(context).conversationId);
+        const acknowledged = context.answerCallbackQuery().catch(error => {
+          this.logger.warn(telegramErrorMetadata(error), "Telegram 停止按钮回执失败");
+        });
+        try {
+          await this.executeCommand(context, command, "");
+          if (cancelledInteraction) await this.replyHelpPanel(context, interactionStoppedText);
+        } finally {
+          await acknowledged;
+        }
+        return;
+      }
+      await context.answerCallbackQuery();
+      await this.executeCommand(context, command, command === "fast" ? "status" : "");
+    });
     for (const command of conversationCommandNames.filter(
       (candidate) => candidate !== "stop",
     )) {
-      this.bot.command(telegramConversationCommandName(command), (context) =>
+      this.bot.command(commandNames(command), (context) =>
         this.executeCommand(context, command));
     }
-    this.bot.command("work", (context) =>
-      this.executeCommand(context, surfaceCommandAliases.work));
-    this.bot.command("r", (context) =>
-      this.executeCommand(context, surfaceCommandAliases.r));
-    this.bot.command("stop", async (context) => {
+    this.bot.command(commandNames("stop"), async (context) => {
       const cancelledInteraction = this.interactions.stopForChat(String(context.chat.id));
       await this.executeCommand(context, "stop");
       if (cancelledInteraction) await context.reply(interactionStoppedText);
@@ -687,7 +702,7 @@ export class TelegramSurface {
       }, String(context.from.id));
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
@@ -711,7 +726,7 @@ export class TelegramSurface {
       );
     });
     this.bot.callbackQuery(
-      /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
+      /^mp:(home|[1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
         const guard = this.queryGuard(modelTarget, String(context.from.id));
@@ -726,14 +741,14 @@ export class TelegramSurface {
           );
         }
         const providers = listProviders(state.models);
-        const provider = providers[Number(context.match[1]) - 1];
-        if (!provider) {
+        const provider = context.match[1] === "home" ? "" : providers[Number(context.match[1]) - 1];
+        if (provider === undefined) {
           throw new UserFacingError(
             "model.selection.expired",
             "提供商列表已变化，请重新发送 /model 选择",
           );
         }
-        await context.answerCallbackQuery({ text: "正在浏览提供商" });
+        await context.answerCallbackQuery({ text: provider ? "正在浏览提供商" : "返回提供商列表" });
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
@@ -768,7 +783,7 @@ export class TelegramSurface {
             "模型列表已变化，请重新发送 /model 选择",
           );
         }
-        const selected = state.models[Number(context.match[1]) - 1];
+        const selected = createModelSelectionPresentation(state).entries[Number(context.match[1]) - 1]?.model;
         if (!selected || selected.available === false) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -841,7 +856,7 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^rc:page:([1-9]\d{0,3})$/, async context => {
       await context.answerCallbackQuery({ text: "正在查询重置券" });
       const result = await this.commands.execute(target(context), "limits", `reset ${context.match[1]}`, String(context.from.id));
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^rc:use:([1-9]\d{0,3}):([0-7]):([A-Za-z0-9_-]{43})$/, async context => {
       await context.answerCallbackQuery({ text: "正在核对重置券" });
@@ -854,7 +869,7 @@ export class TelegramSurface {
       const credit = listed.result.credits[Number(context.match[2])];
       if (!credit) throw new UserFacingError("reset-credit.failed", "重置券列表已变化", { reason: "reset_stale" });
       const result = await this.commands.execute(target(context), "limits", `reset use ${credit.id}`, actor);
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^rc:(confirm|cancel):([0-9a-f-]{36})$/, async context => {
       await context.answerCallbackQuery({ text: "正在处理重置券确认" });
@@ -862,7 +877,7 @@ export class TelegramSurface {
       // 业务结果已确定；清理旧按钮失败不能把已消费误报为消费失败。
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "重置券按钮清理失败"); }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(
       /^schedule:confirm:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
@@ -877,18 +892,22 @@ export class TelegramSurface {
           `confirm ${context.match[1]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
       },
     );
     this.bot.callbackQuery("schedule:cancel", async (context) => {
-      await context.answerCallbackQuery({ text: "已取消" });
+      await context.answerCallbackQuery({ text: "返回计划任务列表" });
       await context.editMessageReplyMarkup({
         reply_markup: { inline_keyboard: [] },
       });
-      await context.reply("已取消计划任务操作。未创建或删除任何任务。");
+      const result = await this.commands.execute(target(context), "schedule", "list", String(context.from.id));
+      await this.renderCommandResult(context, result, async (replyContext, replyResult, reply) => {
+        await reply("已关闭这条消息的确认按钮；本次未提交创建或删除。原确认码在五分钟有效期内仍可通过命令使用。");
+        await renderTelegramCommandResult(replyContext, replyResult, reply);
+      });
     });
     this.bot.callbackQuery(/^plugin:page:([1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在加载 Plugin" });
@@ -898,7 +917,7 @@ export class TelegramSurface {
         `list ${context.match[1]}`,
         String(context.from.id),
       );
-      await renderTelegramCommandResult(
+      await this.renderCommandResult(
         context,
         result,
       );
@@ -916,7 +935,7 @@ export class TelegramSurface {
         try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
         catch (error) { this.logger.warn(surfaceErrorMetadata(error), "Hook 确认按钮清理失败"); }
       }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(
       /^plugin:select:([A-Za-z0-9_-]{43})$/,
@@ -960,7 +979,7 @@ export class TelegramSurface {
         `list ${context.match[1]}`,
         String(context.from.id),
       );
-      await renderTelegramCommandResult(
+      await this.renderCommandResult(
         context,
         result,
       );
@@ -1007,7 +1026,7 @@ export class TelegramSurface {
           `start ${context.match[2]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1055,7 +1074,7 @@ export class TelegramSurface {
           `delete ${context.match[2]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1106,7 +1125,7 @@ export class TelegramSurface {
           `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1547,15 +1566,60 @@ export class TelegramSurface {
     return sequence;
   }
 
+  private async renderHelp(context: Context, page: "home" | "more" | "guide"): Promise<void> {
+    const text = page === "guide" ? [
+      "## 完整命令用法",
+      ...conversationCommandQuickStartLines,
+      "### 消息与附件",
+      "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
+      "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
+      "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
+      "没有绑定会话时会新建会话；继续历史会话请使用 /resume 显式选择。",
+      "",
+      ...conversationCommandHelpLines,
+      "Telegram：",
+      "- /whoami",
+      "- /start · /help · /h",
+    ].join("\n") : page === "home" ? [
+      "## Codex 命令中心",
+      "选择下方操作；普通文本仍会发送到当前 Codex Session。",
+      "停止任务、新会话会直接执行；模型、工作区和会话入口打开选择列表。",
+    ].join("\n") : [
+      "## 更多操作",
+      "选择下方入口查看列表、状态或诊断；调用、修改及确认继续沿用原命令。",
+      "完整参数、其他命令与附件说明见“完整用法”。",
+    ].join("\n");
+    await this.replyHelpPanel(context, text, telegramHelpKeyboard(page));
+  }
+
+  private async replyHelpPanel(context: Context, text: string, keyboard?: InlineKeyboardMarkup): Promise<void> {
+    const original = this.commandReplies.get(context);
+    if (!original || !context.from) throw new UserFacingError("command.authorization-changed", "帮助入口已失效，请重新发送 /help");
+    const inputTarget = target(context);
+    const actorId = String(context.from.id);
+    await this.outbox.runOrdered(inputTarget.conversationId, async signal => {
+      await replyTelegramPanel(context, text, keyboard, (chunk, options) => this.apiExecutor.call({
+        chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
+      }, requestSignal => {
+        original.signal.throwIfAborted();
+        if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) {
+          throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+        }
+        return context.reply(chunk, options, telegramAbortSignal(requestSignal));
+      }, signal));
+    }, original.signal);
+  }
+
   private async executeCommand(
     context: Context,
     command: ConversationCommandName,
+    argumentsText = commandArguments(context),
   ): Promise<void> {
     if (!context.from) throw new UserFacingError("command.authorization-changed", "无法确认命令操作者");
     const result = await this.commands.execute(
       target(context),
       command,
-      commandArguments(context),
+      argumentsText,
       String(context.from.id),
     );
     if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
@@ -1583,13 +1647,16 @@ export class TelegramSurface {
     };
   }
 
-  private async renderCommandResult(context: Context, result: ConversationCommandResult): Promise<void> {
+  private async renderCommandResult(
+    context: Context,
+    result: ConversationCommandResult,
+    render: (context: Context, result: ConversationCommandResult, reply: Context["reply"]) => Promise<void> = renderTelegramCommandResult,
+  ): Promise<void> {
     const relevant = result.kind === "status" || result.kind === "workspaces" || result.kind === "models"
       || result.kind === "metrics" || result.kind === "usage" || result.kind === "limits"
       || result.kind === "sessions" || result.kind === "collaboration-mode"
       || result.kind === "outcome" && ["workspace.selected", "thread.resumed", "thread.unarchived", "thread.forked",
         "session.new", "thread.archived", "thread.renamed", "thread.pin-updated", "sessions.cleaned"].includes(result.outcome.type);
-    if (!relevant) return renderTelegramCommandResult(context, result);
     const original = this.commandReplies.get(context);
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
@@ -1606,6 +1673,9 @@ export class TelegramSurface {
     // scope, including browse-only changes. Status refreshes also carry it.
     if (result.kind === "models") scope = { ...scope, selectionScope: result.state.selectionScope,
       threadId: this.service.status(inputTarget).threadId };
+    // Reading Goal may create the first Thread. Keep its authoritative source
+    // instead of treating that preparation as an unrelated binding change.
+    if (result.kind === "goal") scope = { ...scope, threadId: result.threadId };
     if (result.kind === "status") {
       if (result.status.workspaceId !== scope.workspaceId || result.status.cwd !== scope.cwd || result.status.threadId !== scope.threadId) {
         throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
@@ -1633,8 +1703,13 @@ export class TelegramSurface {
       assertActor();
       this.usageEdits.get(context)?.assertActive();
       const current = this.commandReplyScope(inputTarget);
-      if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
-        || current.selectionScope !== scope.selectionScope || current.threadId !== scope.threadId) {
+      // Extension/task queries belong to the original workspace and thread,
+      // but do not depend on model browsing. Completed outcomes keep their
+      // business identity rather than acquiring a new model-selection scope.
+      if ((relevant || result.kind !== "outcome")
+        && (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
+          || current.threadId !== scope.threadId
+          || relevant && current.selectionScope !== scope.selectionScope)) {
         throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
       }
     };
@@ -1668,7 +1743,7 @@ export class TelegramSurface {
           messageId: deliveredId, expiresAt: this.now() + 10 * 60_000, scope: { ...scope }, inputs: choices.map(choice => choice.input) });
         return;
       }
-      await renderTelegramCommandResult(context, result, (text, options) => this.apiExecutor.call({
+      await render(context, result, (text, options) => this.apiExecutor.call({
         chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
       }, requestSignal => {
         guard();
@@ -1710,7 +1785,9 @@ export class TelegramSurface {
       });
     }
     try {
-      await replyTelegramPanel(context, formatConversationAutoReview(result), token ? threadAutoReviewKeyboard(token) : undefined);
+      await this.renderCommandResult(context, result, async (_context, _result, reply) => {
+        await replyTelegramPanel(context, formatConversationAutoReview(result), token ? threadAutoReviewKeyboard(token) : undefined, reply);
+      });
     } catch (error) {
       if (token) this.autoReviewSelections.delete(token);
       throw error;
@@ -1720,11 +1797,13 @@ export class TelegramSurface {
   private receiveAttachmentUpdate(update: Context["update"]): (() => void) | undefined {
     this.receivedUpdates.add(update);
     const message = update.message;
-    if (!message?.from || message.chat.type !== "private" || this.stopping) return;
+    const chat = message?.chat ?? update.callback_query?.message?.chat;
+    const actor = message?.from ?? update.callback_query?.from;
+    if (!actor || chat?.type !== "private" || this.stopping) return;
     const inputTarget: ConversationTarget = {
-      surface: "telegram", accountId: this.accountId, conversationId: String(message.chat.id),
+      surface: "telegram", accountId: this.accountId, conversationId: String(chat.id),
     };
-    const actorId = String(message.from.id);
+    const actorId = String(actor.id);
     const allowed = () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId });
     if (allowed()) this.rememberPrivateConversation(inputTarget, actorId);
     if (isTelegramEmergencyStopUpdate(update, this.bot)) {
@@ -1736,6 +1815,7 @@ export class TelegramSurface {
       if (stop.cancelled) this.attachmentStops.add(update);
       return stop;
     }
+    if (!message) return;
     const kind = message.voice || message.audio ? "audio"
       : message.video || message.video_note || (message.document && isVideoDocument(message.document.mime_type, message.document.file_name))
         ? "video" : undefined;

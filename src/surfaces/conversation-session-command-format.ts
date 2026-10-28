@@ -5,6 +5,7 @@ import type {
 } from "../application/index.js";
 
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { createSessionListPresentation } from "./session-list-presentation.js";
 import { formatDisplayedProvider } from "./provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
@@ -15,6 +16,7 @@ export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
   formatLiteral: (value: string) => string = value => value,
   formatCommand?: (value: string) => string,
+  entryLayout: "spaced" | "compact" = "spaced",
 ): string {
   const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
   const command = (value: string): string => {
@@ -28,16 +30,24 @@ export function formatConversationSessions(
       ? `页码超出范围：第 ${result.page} 页，共 ${result.pageCount} 页。`
       : `当前 Workspace 没有匹配的${scope}。`;
   }
-  const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
+  const entries = createSessionListPresentation(result);
   return toStructuredMarkdownList([
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${literal(result.view.searchTerm)}` : ""}：`,
-    ...result.sessions.map(
-      (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${session.model ? ` · 模型：${literal(session.model)}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}` : ""}${session.modelProvider ? ` · Provider：${literal(formatDisplayedProvider(session.modelProvider))}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${literal(session.id.slice(0, 12))} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+    ...entries.map(
+      ({ session, selector, isCurrent, isBackground }) =>
+        [
+          `${selector}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${isCurrent ? " · 当前" : isBackground ? " · 后台运行" : ""}`,
+          ...(entryLayout === "spaced" ? [""] : []),
+          ...(session.model ? [`- 模型：${literal(session.model)}`] : []),
+          ...(session.reasoningEffort ? [`- ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}`] : []),
+          ...(session.modelProvider ? [`- Provider：${literal(formatDisplayedProvider(session.modelProvider))}`] : []),
+          `- ID：${literal(session.id.slice(0, 12))} · 状态：${session.status.type}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`}`,
+          "",
+        ].join("\n"),
     ),
     ...(result.pageCount > 1
       ? [
-          "",
+          ...(entryLayout === "spaced" ? [""] : []),
           ...(result.page > 1
             ? [`- 上一页：${command(formatSessionListCommand(result, result.page - 1))}`]
             : []),
@@ -46,7 +56,7 @@ export function formatConversationSessions(
             : []),
         ]
       : []),
-    "",
+    ...(entryLayout === "spaced" || result.pageCount > 1 ? [""] : []),
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Session ID>"
       : "恢复：/resume <序号、名称或 Session ID>",
@@ -160,9 +170,13 @@ function formatSessionLabel(value: string): string {
   if (!normalized) {
     return "未命名";
   }
-  return normalized.length > maximumSessionLabelCharacters
-    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
-    : normalized;
+  if (normalized.length <= maximumSessionLabelCharacters) return normalized;
+  let prefix = "";
+  for (const character of normalized) {
+    if (prefix.length + character.length > maximumSessionLabelCharacters - 1) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
 }
 
 export function formatConversationOccupancy(

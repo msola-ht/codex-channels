@@ -1,5 +1,4 @@
 import {
-  listProviders,
   type AccountMetric,
   type AccountThreadUsage,
   type AccountThreadUsageGroup,
@@ -24,6 +23,7 @@ import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { isOllamaCloudAccountProvider } from "../../runtime/ollama-cloud-accounts.mjs";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
+import { createModelSelectionPresentation } from "./model-selection-presentation.js";
 
 const maximumThreadUsageGroups = 8;
 
@@ -33,21 +33,15 @@ export function formatConversationModels(
   formatLiteral: (value: string) => string = (value) => value,
 ): string {
   const { state } = result;
+  const view = createModelSelectionPresentation(state);
   const literal = (value: string): string => formatModelSettingLiteral(value, formatLiteral);
-  const current = state.models.find((model) =>
-    model.available !== false && model.model === state.model
-    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+  const current = view.availableCurrentModel;
   const effortName = reasoningEffortSettingName(state.effort, current);
   // The field structure is known here; a trailing colon in metadata is data.
   const setting = formatConversationModelState(result, formatLiteral).map(line => `- ${line}`);
-  const scopedModels = state.providerFilter === undefined
-    ? state.models
-    : state.models.filter(
-        (model) => (model.provider ?? "openai") === state.providerFilter,
-      );
   if (result.view === "fast") {
     return toStructuredMarkdownList([
-      "## 速度设置",
+      "## Fast 设置",
       ...setting,
       `模型支持：${formatModelSpeedSupport(current)}`,
       "",
@@ -62,13 +56,13 @@ export function formatConversationModels(
       `可用${effortName}：`,
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
-          `${index + 1}. ${literal(formatReasoningEffort(option.effort))}${option.effort === state.effort ? " ← 当前" : ""} · ${literal(option.description)}`,
+          `${index + 1}. ${literal(formatReasoningEffort(option.effort))}${option.effort === state.effort ? state.effortPending ? " · 已选" : " · 当前" : ""} · ${literal(option.description)}\n`,
       ),
       "",
       "切换：/effort <序号或档位>",
     ].join("\n"));
   }
-  const providers = listProviders(state.models);
+  const providers = view.providers;
   if (providers.length === 0) {
     return toStructuredMarkdownList([
       "## 选择模型",
@@ -83,8 +77,8 @@ export function formatConversationModels(
       ...setting,
       "",
       "提供商列表：",
-      ...providers.map((provider, index) =>
-        `${index + 1}. ${literal(formatCodexProviderLabel(provider))}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
+      ...providers.map(({ id, position }) =>
+        `${position}. ${literal(formatCodexProviderLabel(id))}${id === currentProvider ? state.providerPending ? " · 已选" : " · 当前" : ""} · ${formatProviderModelSummary(state.models, id)}\n`,
       ),
       "",
       "下一步：/model <提供商序号>",
@@ -94,15 +88,16 @@ export function formatConversationModels(
     "## 选择模型",
     ...setting,
     "",
-    `- 浏览 Provider：${literal(formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0]))}（浏览不会切换当前设置）`,
-    `模型列表（${scopedModels.length}）：`,
-    ...scopedModels.map((model, index) => {
+    `- 浏览 Provider：${literal(formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0]?.id))}（浏览不会切换当前设置）`,
+    `模型列表（${view.entries.length}）：`,
+    ...view.entries.map(({ model, position, isCurrent }) => {
       // 列表项使用提供商与原目录名称，统计分组不参与模型选择。
       const entry = modelListEntry(model.displayName, model.provider, model.model);
-      return `${index + 1}. ${literal(entry.name)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${literal(model.unavailableReason)}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model, literal)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
+      return `${position}. ${literal(entry.name)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${literal(model.unavailableReason)}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model, literal)}${isCurrent ? state.modelPending ? " · 已选" : " · 当前" : ""}\n`;
     }),
     "",
     "切换：/model <模型序号>",
+    ...(state.providerFilter === undefined ? [] : ["返回模型入口：/model"]),
   ].join("\n"));
 }
 
@@ -120,9 +115,7 @@ export function formatConversationModelState(
   formatLiteral: (value: string) => string = (value) => value,
 ): string[] {
   const { state } = result;
-  const current = state.models.find((model) =>
-    model.available !== false && model.model === state.model
-    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+  const current = createModelSelectionPresentation(state).availableCurrentModel;
   const literal = (value: string): string => formatModelSettingLiteral(value, formatLiteral);
   const effortName = reasoningEffortSettingName(state.effort, current);
   return [

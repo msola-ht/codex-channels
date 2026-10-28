@@ -65,11 +65,11 @@ export function renderConversationCommandResult(
     case "thread-revert-preview":
       return formatConversationThreadRevertPreview(result);
     case "scheduled-tasks":
-      return formatConversationScheduledTasks(result);
+      return formatConversationScheduledTasks(result, "snapshot", "text", formatLiteral);
     case "scheduled-runs":
-      return formatConversationScheduledRuns(result);
+      return formatConversationScheduledRuns(result, "snapshot", "text", formatLiteral);
     case "scheduled-confirmation":
-      return formatConversationScheduledConfirmation(result);
+      return formatConversationScheduledConfirmation(result, formatLiteral);
     case "status":
       return formatConversationStatus(result.status, undefined, result);
     case "workspaces":
@@ -81,29 +81,29 @@ export function renderConversationCommandResult(
     case "collaboration-mode":
       return formatConversationCollaborationMode(result);
     case "skills":
-      return formatConversationSkills(result);
+      return formatConversationSkills(result, false, formatLiteral);
     case "agents":
-      return formatConversationAgents(result);
+      return formatConversationAgents(result, false, formatLiteral);
     case "mcp":
-      return formatConversationMcp(result);
+      return formatConversationMcp(result, 0, formatLiteral);
     case "mcp-health":
-      return formatConversationMcpHealth(result);
+      return formatConversationMcpHealth(result, false, formatLiteral);
     case "mcp-reload":
       return formatConversationMcpReload(result);
     case "mcp-detail":
-      return formatConversationMcpDetail(result);
+      return formatConversationMcpDetail(result, false, formatLiteral);
     case "mcp-login":
-      return formatConversationMcpLogin(result);
+      return formatConversationMcpLogin(result, formatLiteral);
     case "mcp-resource":
-      return formatConversationMcpResource(result);
+      return formatConversationMcpResource(result, formatLiteral);
     case "plugins":
-      return formatConversationPlugins(result);
+      return formatConversationPlugins(result, false, formatLiteral);
     case "hooks":
       return formatConversationHooks(result.view);
     case "plugin-health":
-      return formatConversationPluginHealth(result);
+      return formatConversationPluginHealth(result, formatLiteral);
     case "plugin-detail":
-      return formatConversationPluginDetail(result);
+      return formatConversationPluginDetail(result, false, formatLiteral);
     case "usage":
       return formatConversationUsage(result);
     case "metrics":

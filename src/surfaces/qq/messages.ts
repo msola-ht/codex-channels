@@ -779,7 +779,7 @@ export class QqMessages implements SurfaceOutputPort {
           };
           const result = await this.executeQueue(message, target, command.argumentsText, guard);
           guard();
-          const menu = this.menus.fromResult(target, message.actorId, result);
+          const menu = await this.menus.fromResult(target, message.actorId, result);
           stage = "reply";
           const current = () => {
             try { guard(); return !menu || menu.isCurrent(); } catch { return false; }
@@ -856,7 +856,7 @@ export class QqMessages implements SurfaceOutputPort {
           ? this.menuScope(target) : undefined;
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId, target.conversationId) : commandScope;
-        let menu = taskCommand ? undefined : this.menus.fromResult(target, message.actorId, result);
+        let menu = taskCommand ? undefined : await this.menus.fromResult(target, message.actorId, result);
         if (menu && QUERY_COMMANDS.has(command.name)) {
           // Adding buttons must preserve the original query's complete-result
           // budget and oversized notice, including passive reply limits.
@@ -878,8 +878,9 @@ export class QqMessages implements SurfaceOutputPort {
           stage = "reply";
           await this.reply(message, panel.content, () => {
             const sameContext = result.kind === "models" && command.argumentsText.trim()
-              ? this.menuWorkspaceScope(target) === menuWorkspaceScope && !!result.state.selectionScope
-                && result.state.selectionScope === this.options.service.status(target).selectionScope
+              // The panel owns the final snapshot, including any browse reset
+              // needed to display the current model's settings.
+              ? this.menuWorkspaceScope(target) === menuWorkspaceScope
               : this.menuScope(target) === menuScope;
             return sameContext && panel.isCurrent() && queryCurrent() && this.allowed(target, message.actorId)
               && (extensionScope === undefined || this.extensionQueryScope(target) === extensionScope);

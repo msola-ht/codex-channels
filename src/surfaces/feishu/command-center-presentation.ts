@@ -1,7 +1,4 @@
 import {
-  fastServiceTierId,
-  ultrafastServiceTierId,
-  listProviders,
   modelSelectionSnapshot,
   type ConversationCommandResult,
 } from "../../application/index.js";
@@ -23,7 +20,7 @@ import {
   formatConversationAutoReview,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -33,6 +30,9 @@ import type {
 import { escapeFeishuCardMarkdown } from "./message-content.js";
 import { renderFeishuCommandResult } from "./renderer.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
+import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
+import { createSessionListPresentation } from "../session-list-presentation.js";
 
 const feishuQueueChoiceChunkSize = 13;
 
@@ -50,8 +50,8 @@ export function renderQueueCommandCenterChoices(
   }
   const start = chunk * feishuQueueChoiceChunkSize;
   const visibleItems = items.slice(start, start + feishuQueueChoiceChunkSize);
-  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item) => ({
-    label: queueChoiceLabel(item),
+  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item, index) => ({
+    label: choiceButtonLabel(`${result.result.selectors[start + index] ?? "?"} · ${queueChoiceLabel(item)}`),
     action: "queue",
     input: `item ${result.result.page} ${chunk + 1} ${item.id}`,
   }));
@@ -97,9 +97,23 @@ export function renderQueueCommandCenterChoices(
   const lastVisible = visibleItems.length > 0 ? start + visibleItems.length : 0;
   return {
     title: `App Server Queue · 第 ${result.result.page}/${result.result.pageCount} 页`,
-    description: result.result.totalItemCount === 0
-      ? "Queue 为空；可新增纯文本条目。更新与排序请使用 /queue update|reorder 文本命令。"
-      : `当前显示第 ${firstVisible}-${lastVisible}/${items.length} 条；业务页最多 25 条，卡片按每组最多 ${feishuQueueChoiceChunkSize} 条展示。条目操作只使用安全预览，点击后可启动或删除；更新与排序请使用 /queue update|reorder 文本命令。`,
+    description: [
+      `共 ${result.result.totalItemCount} 条${visibleItems.length > 0 ? ` · 本页第 ${firstVisible}-${lastVisible}/${items.length} 条` : ""}`,
+      "",
+      ...(result.result.totalItemCount === 0
+        ? ["Queue 为空；可新增纯文本条目。", ""]
+        : result.result.page > result.result.pageCount
+        ? ["当前页面已不存在，请使用 /queue list 1 重新查看。", ""]
+        : visibleItems.flatMap((item, index) => [
+            `**${result.result.selectors[start + index] ?? "?"}. ${formatThreadQueueInputTypeLabel(item.inputType)}** · ${item.editable ? "可更新" : "只读摘要"}`,
+            "",
+            `安全预览：${choiceCardLiteral(item.textPreview ?? "", 120) || "（无文本预览）"}`,
+            "",
+          ])),
+      ...(visibleItems.length > 0 ? ["点击条目查看详情；启动和删除在详情中操作。", ""] : []),
+      "更新与排序请使用 /queue update|reorder 文本命令。预览过长时会截断。",
+    ].join("\n"),
+    descriptionFormat: "lark_md",
     choices,
   };
 }
@@ -166,9 +180,8 @@ export function renderQueueDeleteConfirmationChoices(
 function queueChoiceLabel(
   item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
 ): string {
-  return item.textPreview
-    ? item.textPreview
-    : `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
+  return formatModelSettingLiteral(item.textPreview ?? "")
+    || `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
 }
 
 export function renderCommandCenterInitialChoices(
@@ -265,20 +278,22 @@ export function renderCommandCenterForm(
     return {
       kind: "form",
       title: "搜索会话",
-      description: "按会话名称、预览或 Session ID 搜索。",
+      description: "按会话标题搜索；输入内容均作为搜索词。",
       action: "sessions",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
+      inputPrefix: "search ",
     };
   }
   if (action === "archived-search") {
     return {
       kind: "form",
       title: "搜索已归档会话",
-      description: "按会话名称、预览或 Session ID 搜索。",
+      description: "按会话标题搜索；输入内容均作为搜索词。",
       action: "archived",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
+      inputPrefix: "search ",
     };
   }
   if (action === "rename") {
@@ -357,7 +372,12 @@ export function renderCommandCenterChoices(
       title: result.view.confirmation ? "确认 Hook 配置操作" : "Hooks",
       description: formatConversationHooks(result.view),
       descriptionFormat: "plain_text",
-      choices: hookCommandChoices(result.view).map(choice => ({ ...choice, action: "hooks" })),
+      choices: hookCommandChoices(result.view).map(choice => ({
+        ...choice,
+        action: "hooks",
+        ...(result.view.confirmation && choice.input === `confirm ${result.view.confirmation.token}`
+          ? { style: "primary" as const } : {}),
+      })),
     };
   }
   if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
@@ -370,13 +390,14 @@ export function renderCommandCenterChoices(
       title: "确认使用重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: (["confirm", "cancel"] as const).map(operation => ({
         label: operation === "confirm" ? "确认使用" : "取消", action: "limits", input: `reset ${operation} ${value.token}`,
+        ...(operation === "confirm" ? { style: "primary" as const } : {}),
         acceptedState: { title: "重置券请求已提交", description: "原按钮已失效，执行结果见后续消息。", template: "grey" },
       })),
     };
     if (value.type === "list") return {
       title: "选择重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: [
-        ...value.credits.map((credit, index) => ({ label: `${index + 1}. ${credit.title ?? "用量重置券"}`.slice(0, 80), action: "limits" as const, input: `reset use ${credit.id}` })),
+        ...value.credits.map((credit, index) => ({ label: choiceButtonLabel(`${index + 1}. ${formatModelSettingLiteral(credit.title ?? "用量重置券")}`), action: "limits" as const, input: `reset use ${credit.id}` })),
         ...(value.page > 1 ? [{ label: "上一页", action: "limits" as const, input: `reset ${value.page - 1}` }] : []),
         ...(value.page < value.pageCount ? [{ label: "下一页", action: "limits" as const, input: `reset ${value.page + 1}` }] : []),
         { label: "刷新", action: "limits", input: `reset ${value.page}` },
@@ -388,10 +409,23 @@ export function renderCommandCenterChoices(
       title: `Gateway 计划任务 · 第 ${result.result.page}/${result.result.pageCount} 页`,
       description: result.result.totalTaskCount === 0
         ? "当前没有计划任务。"
-        : `共 ${result.result.totalTaskCount} 项；选择任务后可查看运行记录或执行管理操作。`,
+        : [
+            `共 ${result.result.totalTaskCount} 项`,
+            "",
+            ...result.result.tasks.flatMap((task, index) => [
+              `**${result.result.selectors[index] ?? "?"}. ${choiceCardLiteral(task.name, 32)}** · ${formatScheduledTaskStatusLabel(task.status)}`,
+              "",
+              `计划：${choiceCardLiteral(scheduleChoiceSummary(task.schedule))} · ${choiceCardLiteral(task.timezone, 80)}`,
+              "",
+              `下次运行：${formatScheduledAt(task.nextRunAt)}`,
+              "",
+            ]),
+            "选择任务查看详情和运行记录，再执行管理操作。",
+          ].join("\n"),
+      descriptionFormat: "lark_md",
       choices: [
-        ...result.result.tasks.map((task) => ({
-          label: `${formatScheduledTaskStatusLabel(task.status)} · ${task.name}`,
+        ...result.result.tasks.map((task, index) => ({
+          label: choiceButtonLabel(`${result.result.selectors[index] ?? "?"} · ${formatModelSettingLiteral(task.name)}`),
           action: "schedule" as const,
           input: `task ${task.taskId}`,
         })),
@@ -472,6 +506,7 @@ export function renderCommandCenterChoices(
           label: "确认",
           action: "schedule",
           input: `confirm ${result.preview.token}`,
+          style: result.preview.action === "delete" ? "danger" : "primary",
           acceptedState: {
             title: `已确认${actionLabel}计划任务`,
             description: "请求已提交，原按钮已失效；执行结果见后续消息。",
@@ -479,12 +514,12 @@ export function renderCommandCenterChoices(
           },
         },
         {
-          label: "取消",
+          label: "返回列表",
           action: "schedule",
           input: "list 1",
           acceptedState: {
-            title: `已取消${actionLabel}计划任务`,
-            description: `未${actionLabel}计划任务，原按钮已失效。`,
+            title: "已请求返回计划任务列表",
+            description: "未提交创建或删除；此卡片按钮已失效，原确认码在有效期内仍可通过命令使用。",
             template: "grey",
           },
         },
@@ -492,7 +527,11 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "plugin" && result.kind === "plugins") {
-    const callable = result.plugins.filter((plugin) =>
+    const entries = result.plugins.map((plugin, index) => ({
+      plugin,
+      selector: result.selectors[index] ?? "?",
+    }));
+    const callable = entries.filter(({ plugin }) =>
       plugin.enabled && plugin.available
     );
     const searchSuffix = result.searchTerm ? ` search ${result.searchTerm}` : "";
@@ -512,15 +551,37 @@ export function renderCommandCenterChoices(
           }]
         : []),
     ];
-    if (callable.length === 0 && navigation.length === 0) {
-      return undefined;
-    }
     return {
       title: `选择 Plugin · 第 ${result.page}/${result.pageCount} 页`,
-      description: "仅显示当前页已启用且可调用的 Plugin，可继续翻页。",
+      description: [
+        `共 ${result.totalPluginCount} 项 · 匹配 ${result.matchedPluginCount} 项`,
+        ...(result.searchTerm ? [`搜索：${choiceCardLiteral(result.searchTerm)}`] : []),
+        ...(result.loadErrorCount > 0
+          ? ["", `注意：${result.loadErrorCount} 个 Plugin Marketplace 加载失败，列表可能不完整。`]
+          : []),
+        "",
+        ...(result.page > result.pageCount
+          ? ["当前页面已不存在，请通过 /plugin list 重新查看。", ""]
+          : entries.length === 0
+          ? [result.searchTerm
+              ? "没有匹配的 Plugin。"
+              : result.loadErrorCount > 0 ? "本次未取得 Plugin 列表。" : "当前没有已安装的 Plugin。", ""]
+          : entries.flatMap(({ plugin, selector }) => [
+              `**${selector}. ${choiceCardLiteral(plugin.displayName, 32)}** · ${plugin.enabled ? "已启用" : "未启用"} · ${plugin.available ? "可用" : "不可用"}`,
+              "",
+              ...(plugin.description ? [choiceCardLiteral(plugin.description, 160), ""] : []),
+            ])),
+        ...(callable.length > 0
+          ? ["仅已启用且可用的条目提供按钮；选择后填写任务，再提交调用。"]
+          : entries.length > 0 ? ["本页没有可调用的 Plugin。"] : []),
+        "健康检查：/plugin health",
+        "搜索：/plugin list search <关键词>",
+        "详情：/plugin <名称、完整 ID 或序号>",
+      ].join("\n"),
+      descriptionFormat: "lark_md",
       choices: [
-        ...callable.map((plugin) => ({
-          label: `${plugin.displayName} · ${plugin.id}`,
+        ...callable.map(({ plugin, selector }) => ({
+          label: choiceButtonLabel(`${selector} · ${formatModelSettingLiteral(plugin.displayName)}`),
           action: "plugin" as const,
           input: plugin.id,
         })),
@@ -533,69 +594,33 @@ export function renderCommandCenterChoices(
     && result.kind === "sessions"
     && !result.archived
   ) {
-    if (result.sessions.length === 0) {
-      return undefined;
-    }
-    const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
-    return {
-      title: "选择会话",
-      description: "点击后切换到对应 Codex Session。",
-      choices: [
-        {
-          label: "搜索会话…",
-          action: "sessions-search",
-          input: "",
-        },
-        ...sessionNavigationChoices(result, "sessions"),
-        ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
-          action: "resume" as const,
-          input: session.id,
-        })),
-      ],
-    };
+    return renderSessionCommandChoices(result);
   }
   if (action === "archived" && result.kind === "sessions" && result.archived) {
-    if (result.sessions.length === 0) {
-      return undefined;
-    }
-    return {
-      title: "恢复已归档会话",
-      description: "点击后取消归档并切换到对应 Codex Session。",
-      choices: [
-        {
-          label: "搜索归档…",
-          action: "archived-search",
-          input: "",
-        },
-        ...sessionNavigationChoices(result, "archived"),
-        ...result.sessions.map((session) => ({
-          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
-          action: "unarchive" as const,
-          input: session.id,
-        })),
-      ],
-    };
+    return renderSessionCommandChoices(result);
   }
   if (action === "workspace" && result.kind === "workspaces") {
-    if (result.workspaces.length === 0) {
+    const view = createWorkspaceSelectionPresentation(result);
+    if (view.entries.length === 0) {
       return undefined;
     }
-    return {
-      title: "选择工作区",
-      description: [
+    return paginatedChoiceList("工作区", [
         "### 当前工作区",
-        `- ${result.currentWorkspaceId}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效）"}`,
+        `- ${choiceCardLiteral(view.currentWorkspaceId)}${view.currentWorkspace ? "" : "（已失效）"}`,
         "",
-        "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
-      ].join("\n"),
-      descriptionFormat: "markdown",
-      choices: result.workspaces.map((workspace) => ({
-        label: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}${workspace.name}`,
-        action: "workspace-select",
-        input: workspace.id,
-      })),
-    };
+        "### 工作区清单",
+      ].join("\n"), view.entries.map(workspace => ({
+        description: [
+          `**${workspace.position}. ${choiceCardLiteral(workspace.name, 80)}**${workspace.isCurrent ? " · 当前" : ""}`,
+          "",
+          `目录：${choiceCardLiteral(workspace.cwd, 160)}`,
+        ].join("\n"),
+        choice: {
+          label: choiceButtonLabel(`${workspace.position} · ${formatModelSettingLiteral(workspace.name)}`),
+          action: "workspace-select",
+          input: workspace.id,
+        },
+      })), "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。");
   }
   if (action === "permissions" && result.kind === "permissions") {
     return {
@@ -644,55 +669,50 @@ export function renderCommandCenterChoices(
     return undefined;
   }
   const snapshot = modelSelectionSnapshot(result.state);
-  const currentModel = result.state.models.find(
-    (model) =>
-      model.available !== false && model.model === result.state.model
-      && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
-  );
-  const settingLines = formatConversationModelState(result, escapeFeishuCardMarkdown).map(line => `- ${line}`);
+  const presentation = createModelSelectionPresentation(result.state);
+  const currentModel = presentation.availableCurrentModel;
+  const settingLines = formatConversationModelState(result, choiceCardLiteral).map(line => `- ${line}`);
   if (action === "model") {
     if (result.state.models.length === 0) {
       return undefined;
     }
     if (result.state.providerFilter === undefined) {
-      const providers = listProviders(result.state.models);
-      const current = result.state.modelProvider ?? "openai";
-      return {
-        title: "选择提供商",
-        description: [
+      return paginatedChoiceList("选择提供商", [
           "### 当前模型",
           ...settingLines,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
-        ].join("\n"),
-        descriptionFormat: "markdown",
-        choices: providers.map((provider) => ({
-          label: `${provider === current ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))} · ${formatProviderModelSummary(result.state.models, provider)}`,
-          action: "model",
-          input: provider,
-          modelSelection: { kind: "browse-provider", provider, snapshot },
-        })),
-      };
+          "",
+          "### 提供商清单",
+        ].join("\n"), presentation.providers.map(({ id: provider, position, isCurrent }) => ({
+          description: `${position}. **${choiceCardLiteral(formatCodexProviderLabel(provider), 80)}**${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? " · 已选" : " · 当前" : ""} · ${choiceCardLiteral(formatProviderModelSummary(result.state.models, provider))}`,
+          choice: {
+            label: choiceButtonLabel(`${position} · ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`),
+            action: "model",
+            input: provider,
+            modelSelection: { kind: "browse-provider", provider, snapshot },
+          },
+        })));
     }
-    return {
-      title: "选择模型",
-      description: [
+    return paginatedChoiceList("选择模型", [
         "### 当前设置",
         ...settingLines,
-        `- 浏览 Provider：${formatModelSettingLiteral(formatCodexProviderLabel(result.state.providerFilter), escapeFeishuCardMarkdown)}`,
+        `- 浏览 Provider：${choiceCardLiteral(formatCodexProviderLabel(result.state.providerFilter))}`,
         "",
-        "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。",
-      ].join("\n"),
-      descriptionFormat: "markdown",
-      choices: result.state.models
-        .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
-        .map((model, index) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, index + 1))}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
-        action: "model",
-        input: String(index + 1),
-        modelSelection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
-        })),
-    };
+        presentation.entries.length > 0
+          ? "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。"
+          : "当前提供商没有可选模型，请返回提供商重新选择。",
+        "",
+        "### 模型清单",
+      ].join("\n"), presentation.entries.map(({ model, provider, position, isCurrent }) => ({
+        description: `**${position}. ${choiceCardLiteral(modelListDisplayName(model.displayName, model.provider, model.model), 80)}**${isCurrent ? result.state.modelPending ? " · 已选" : " · 当前" : ""} · ${formatModelSpeedSupport(model)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `：${choiceCardLiteral(model.unavailableReason)}` : ""}` : ""}`,
+        choice: {
+          label: choiceButtonLabel(`${isCurrent ? result.state.modelPending ? "已选 · " : "当前 · " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}`),
+          action: "model",
+          input: String(position),
+          modelSelection: { kind: "model", provider, model: model.model, snapshot },
+        },
+      })), undefined, [{ label: "返回提供商", action: "model", input: "" }]);
   }
   if (action === "effort") {
     const efforts = currentModel?.supportedReasoningEfforts ?? [];
@@ -704,8 +724,13 @@ export function renderCommandCenterChoices(
       description: [
         "### 当前设置",
         ...settingLines,
+        "",
+        "### 可选档位",
+        ...efforts.slice(0, 18).map((option, index) =>
+          `${index + 1}. **${choiceCardLiteral(formatReasoningEffort(option.effort), 40)}**${option.effort === result.state.effort ? result.state.effortPending ? " · 已选" : " · 当前" : ""}${option.description ? ` · ${choiceCardLiteral(option.description, 160)}` : ""}`
+        ),
       ].join("\n"),
-      descriptionFormat: "markdown",
+      descriptionFormat: "lark_md",
       choices: efforts.map(
         (option) => ({
           label: `${option.effort === result.state.effort ? "✓ " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
@@ -720,32 +745,57 @@ export function renderCommandCenterChoices(
     const speed = result.state.serviceTierKnown !== true
       ? "未知" : formatServiceTier(result.state.serviceTier, currentModel);
     return {
-      title: "切换速度",
-      description: [...settingLines, `- 当前模型：${formatModelSpeedSupport(currentModel)}`].join("\n"),
-      descriptionFormat: "markdown",
-      choices: [
-        {
-          label: `${speed === "Standard" ? "✓ " : ""}Standard`,
-          action: "fast",
-          input: "off",
-          modelSelection: { kind: "fast", mode: "off", snapshot },
-        },
-        ...(currentModel && fastServiceTierId(currentModel) ? [{
-          label: `${speed === "Fast" ? "✓ " : ""}Fast`,
-          action: "fast",
-          input: "on",
-          modelSelection: { kind: "fast", mode: "on", snapshot },
-        } as const] : []),
-        ...(currentModel && ultrafastServiceTierId(currentModel) ? [{
-          label: `${speed === "Ultrafast" ? "✓ " : ""}Ultrafast`,
-          action: "fast",
-          input: "ultrafast",
-          modelSelection: { kind: "fast", mode: "ultrafast", snapshot },
-        } as const] : []),
-      ],
+      title: "Fast",
+      description: [
+        ...settingLines,
+        `- 当前模型：${formatModelSpeedSupport(currentModel)}`,
+        "",
+        "### 可选速度",
+        ...presentation.speedOptions.map(({ label, mode }) =>
+          `- **${label}**${speed === label ? " · 已选" : ""} · ${mode === "off" ? "标准档位" : mode === "on" ? "Fast 加速档位" : "Ultrafast 加速档位"}`
+        ),
+      ].join("\n"),
+      descriptionFormat: "lark_md",
+      choices: presentation.speedOptions.map(({ label, mode }) => ({
+        label: `${speed === label ? "✓ " : ""}${label}`,
+        action: "fast",
+        input: mode,
+        modelSelection: { kind: "fast", mode, snapshot },
+      })),
     };
   }
   return undefined;
+}
+
+/** Paginate only presentation; retain original identities and model snapshots on every page. */
+function paginatedChoiceList(
+  title: string,
+  header: string,
+  entries: ReadonlyArray<{ description: string; choice: FeishuCommandCenterChoices["choices"][number] }>,
+  footer?: string,
+  returnChoices: FeishuCommandCenterChoices["choices"] = [],
+): FeishuCommandCenterChoices {
+  const pageSize = 15;
+  const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+  const selectPage = (page: number): FeishuCommandCenterChoices => {
+    if (!Number.isSafeInteger(page) || page < 1 || page > pageCount) {
+      throw new UserFacingError("command.unsupported", "选择列表页码无效，请重新打开");
+    }
+    const visible = entries.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      title: pageCount > 1 ? `${title} · 第 ${page}/${pageCount} 页` : title,
+      description: [header, ...visible.map(entry => entry.description), ...(footer ? [footer] : [])].join("\n\n"),
+      descriptionFormat: "lark_md",
+      ...(pageCount > 1 ? { selectPage } : {}),
+      choices: [
+        ...visible.map(entry => entry.choice),
+        ...(page > 1 ? [{ label: "上一页", action: "choices-page" as const, input: String(page - 1) }] : []),
+        ...(page < pageCount ? [{ label: "下一页", action: "choices-page" as const, input: String(page + 1) }] : []),
+        ...returnChoices,
+      ],
+    };
+  };
+  return selectPage(1);
 }
 
 function scheduleChoiceSummary(
@@ -761,6 +811,75 @@ function scheduleChoiceSummary(
     case "weekdays": return `工作日 ${schedule.time}`;
     case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time}`;
   }
+}
+
+function renderSessionCommandChoices(
+  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+): FeishuCommandCenterChoices | undefined {
+  if (result.sessions.length === 0) return undefined;
+  const entries = createSessionListPresentation(result);
+  const listAction = result.archived ? "archived" : "sessions";
+  const restoreAction = result.archived ? "unarchive" : "resume";
+  return {
+    title: result.archived ? "恢复已归档会话" : "选择会话",
+    // Reuse the existing Markdown-body/plain-button path; no option is a default selection.
+    descriptionFormat: "lark_md",
+    description: [
+      `匹配 ${result.matchedSessionCount} 条 · 第 ${result.page}/${result.pageCount} 页`,
+      ...(result.view.searchTerm ? [`搜索：${choiceCardLiteral(result.view.searchTerm)}`] : []),
+      result.archived
+        ? "按下方编号取消归档并切换到对应会话。"
+        : "按下方编号切换到对应会话。",
+      "",
+      ...entries.flatMap(({ session, selector, isCurrent, isBackground }) => {
+        const markers = [
+          ...(!result.archived && isCurrent ? ["当前"] : !result.archived && isBackground ? ["后台"] : []),
+          ...(session.isPinned ? ["固定"] : []),
+        ];
+        const title = choiceCardLiteral((session.name ?? session.preview) || "未命名", 32) || "未命名";
+        const modelFields = [
+          ...(session.model ? [`模型：${choiceCardLiteral(session.model, 80)}`] : []),
+          ...(session.reasoningEffort ? [`${reasoningEffortSettingName(session.reasoningEffort)}：${choiceCardLiteral(formatReasoningEffort(session.reasoningEffort), 40)}`] : []),
+          ...(session.modelProvider ? [`Provider：${choiceCardLiteral(formatDisplayedProvider(session.modelProvider), 80)}`] : []),
+        ];
+        return [
+          `**${selector}. ${title}**${markers.length ? ` · ${markers.join(" · ")}` : ""}`,
+          ...(modelFields.length ? [modelFields.join(" · ")] : []),
+          `ID：${choiceCardLiteral(session.id.slice(0, 12), 12)} · 状态：${choiceCardLiteral(session.status.type, 40)}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`}`,
+          "",
+        ];
+      }),
+      "标题或字段过长时会截断；按钮编号对应以上条目。",
+    ].join("\n"),
+    choices: [
+      { label: result.archived ? "搜索归档" : "搜索会话", action: result.archived ? "archived-search" : "sessions-search", input: "" },
+      ...sessionNavigationChoices(result, listAction),
+      ...entries.map(({ session, selector }): FeishuCommandCenterChoices["choices"][number] => ({
+        label: choiceButtonLabel(`${selector} · ${formatModelSettingLiteral((session.name ?? session.preview) || "未命名") || "未命名"}`),
+        action: restoreAction,
+        input: session.id,
+      })),
+    ],
+  };
+}
+
+function choiceButtonLabel(value: string): string {
+  // Stay within the consumer's 32 UTF-16 unit budget without splitting a code point.
+  if (value.length <= 32) return value;
+  let prefix = "";
+  for (const character of value) {
+    if (prefix.length + character.length > 31) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
+}
+
+function choiceCardLiteral(value: string, maximumCharacters = 120): string {
+  const characters = Array.from(formatModelSettingLiteral(value));
+  const bounded = characters.length > maximumCharacters
+    ? `${characters.slice(0, maximumCharacters - 1).join("")}…`
+    : characters.join("");
+  return escapeFeishuCardMarkdown(bounded.replaceAll("&", "&amp;").replaceAll("<", "&lt;"));
 }
 
 function sessionNavigationChoices(
