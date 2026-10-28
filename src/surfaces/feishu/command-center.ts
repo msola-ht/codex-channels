@@ -25,6 +25,7 @@ import {
 import type { FeishuCardAction } from "./card-action.js";
 import { FeishuExpiredCardActions } from "./card-action-expiry.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
+import { conversationMenuAction } from "../conversation-command-catalog.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -61,24 +62,6 @@ const directStateChangingActions = new Set<FeishuCommandCenterAction>([
   "fork",
   "plan",
 ]);
-
-export const feishuCommandCenterActions = [
-  "new",
-  "resume",
-  "status",
-  "fast",
-  "usage",
-  "metrics",
-  "limits",
-  "model",
-  "effort",
-  "workspace",
-  "goal",
-  "plan",
-  "schedule",
-  "hooks",
-  "help",
-] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
 
 export type FeishuCommandCenterActionResult =
   | "accepted"
@@ -726,43 +709,43 @@ function renderFeishuCategorizedCommandsCard(
   return feishuCardShell("blue", "更多 Codex 命令", [
     sectionTitle("会话查询"),
     actionRow(token, [
-      ["会话列表", "sessions", "primary"],
-      ["已归档", "archived", "default"],
+      menuAction("sessions", "primary"),
+      menuAction("archived"),
     ]),
     sectionTitle("会话操作"),
     actionRow(token, [
-      ["停止任务", "stop", "default"],
-      ["归档当前", "archive", "default"],
-      ["压缩上下文", "compact", "default"],
+      menuAction("stop"),
+      menuAction("archive"),
+      menuAction("compact"),
     ]),
     actionRow(token, [
-      ["分叉会话", "fork", "default"],
-      ["重命名", "rename", "default"],
-      ["App Server Queue", "queue", "default"],
-      ["释放占用", "release", "default"],
+      menuAction("fork"),
+      menuAction("rename"),
+      menuAction("queue"),
+      menuAction("release"),
     ]),
     actionRow(token, [
-      ["固定会话", "pin", "default"],
-      ["取消固定", "unpin", "default"],
-      ["历史回退", "revert", "default"],
+      menuAction("pin"),
+      menuAction("unpin"),
+      menuAction("revert"),
     ]),
     actionRow(token, [
-      ["计划任务", "schedule", "default"],
+      menuAction("schedule"),
     ]),
     sectionTitle("能力与集成"),
     actionRow(token, [
-      ["子代理", "agents", "default"],
-      ["Skills", "skill", "default"],
-      ["MCP", "mcp", "default"],
-      ["Plugin", "plugin", "default"],
-      ["Hooks", "hooks", "default"],
+      menuAction("agents"),
+      menuAction("skill"),
+      menuAction("mcp"),
+      menuAction("plugin"),
+      menuAction("hooks"),
     ]),
     sectionTitle("当前内容"),
     actionRow(token, [
-      ["当前会话审批方式", "autoreview", "default"],
-      ["权限查询", "permissions", "default"],
-      ["Diff", "diff", "default"],
-      ["Review", "review", "default"],
+      menuAction("autoreview"),
+      menuAction("permissions"),
+      menuAction("diff"),
+      menuAction("review"),
     ]),
     sectionTitle("飞书"),
     actionRow(token, [
@@ -781,32 +764,39 @@ export function renderFeishuCommandCenterCard(
     feishuCardPlainText("选择操作；普通文本仍会发送到当前 Codex Session。"),
     sectionTitle("常用"),
     actionRow(token, [
-      ["新会话", "new", "primary"],
-      ["会话切换", "resume", "default"],
-      ["当前状态", "status", "default"],
+      menuAction("new", "primary"),
+      menuAction("resume"),
+      menuAction("status"),
     ]),
     actionRow(token, [
-      ["速度", "fast", "primary"],
-      ["账户用量", "usage", "default"],
-      ["请求指标", "metrics", "default"],
-      ["额度", "limits", "default"],
+      menuAction("fast", "primary"),
+      menuAction("usage"),
+      menuAction("metrics"),
+      menuAction("limits"),
     ]),
     sectionTitle("模型与工作区"),
     actionRow(token, [
-      ["模型设置", "model", "default"],
-      ["思考等级", "effort", "default"],
-      ["工作区", "workspace", "default"],
+      menuAction("model"),
+      menuAction("effort"),
+      menuAction("workspace"),
     ]),
     actionRow(token, [
-      ["Goal", "goal", "default"],
-      ["Plan 模式", "plan", "default"],
-      ["计划任务", "schedule", "default"],
+      menuAction("goal"),
+      menuAction("plan"),
+      menuAction("schedule"),
     ]),
     sectionTitle("更多"),
     actionRow(token, [
       ["帮助与更多命令", "help", "default"],
     ]),
   ]);
+}
+
+/** Static canonical entries only; forms, navigation and allowed selections remain card-owned. */
+function menuAction(command: ConversationCommandName, type: "primary" | "default" = "default"):
+  readonly [string, ConversationCommandName, "primary" | "default"] {
+  const entry = conversationMenuAction(command);
+  return [entry.label, entry.command, type];
 }
 
 function sectionTitle(title: string): Record<string, unknown> {

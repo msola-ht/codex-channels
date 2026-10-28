@@ -5,7 +5,7 @@ import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostic
 import {
   conversationCommandNames,
 } from "../../application/index.js";
-import { conversationCommandDescriptions } from "../conversation-command-help.js";
+import { conversationCommandCatalog } from "../conversation-command-catalog.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -19,7 +19,7 @@ const commands = [
   { command: "start", description: "使用说明" },
   ...conversationCommandNames.map((name) => ({
     command: telegramConversationCommandName(name),
-    description: conversationCommandDescriptions[name],
+    description: conversationCommandCatalog[name].description,
   })),
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];

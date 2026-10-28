@@ -30,7 +30,6 @@ export {
 } from "./card-action.js";
 export {
   FeishuCommandCenter,
-  feishuCommandCenterActions,
   feishuCommandMenuEventKey,
   renderFeishuCommandCenterCard,
   type FeishuCommandCenterAction,

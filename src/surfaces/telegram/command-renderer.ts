@@ -14,6 +14,7 @@ import { formatCodexProviderLabel, formatProviderModelSummary, modelListDisplayN
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatConversationPlugins,
@@ -187,10 +188,11 @@ export function threadAutoReviewKeyboard(token: string): InlineKeyboardMarkup {
 export function workspaceSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
 ): InlineKeyboardMarkup | undefined {
-  if (result.workspaces.length === 0) return undefined;
+  const view = createWorkspaceSelectionPresentation(result);
+  if (view.entries.length === 0) return undefined;
   return {
-    inline_keyboard: result.workspaces.map((workspace) => [{
-      text: boundedButtonLabel(`${workspace.id === result.currentWorkspaceId ? "✓ " : ""}切换到 ${formatModelSettingLiteral(workspace.name)}`),
+    inline_keyboard: view.entries.map((workspace) => [{
+      text: boundedButtonLabel(`${workspace.isCurrent ? "✓ " : ""}切换到 ${formatModelSettingLiteral(workspace.name)}`),
       callback_data: `ws:${telegramWorkspaceSwitchToken(workspace.id)}`,
     }]),
   };

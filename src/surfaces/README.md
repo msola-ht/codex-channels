@@ -246,8 +246,16 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `markdown-fence.ts` 只识别反引号或波浪号围栏、合法开头与匹配结束并推进纯状态；共享列表、渠道命令、问题预览及最终正文复用它，字符预算、分片、截断和转义仍由各渠道负责。
 `markdown-inline-code.ts` 识别完整等长反引号串包裹的行内代码，供微信正文、Telegram HTML 转换及反斜杠解码复用；未闭合标记保留字面内容，平台转义和分片预算仍由调用方负责。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
-`slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
-`/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
+`slash-command.ts` 统一飞书、微信与 QQ 的严格斜杠命令解析，并规范化四渠道共同公开的
+`/h`、`/work`、`/r`、`/skills` 别名；Telegram 在 Bot 注册边界接入同一组显式映射。
+`conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。
+飞书和 QQ 的静态菜单引用该目录，保留渠道标签覆盖、分组、行列与导航；Telegram 的注册说明直接消费目录，
+飞书、Telegram 和微信的文字帮助由 `conversation-command-help.ts` 的结构化用法生成。
+目录不是能力或授权表，不接收外部输入，不替代 QQ 的参数准入、飞书实际卡片的动作集合或任何交互守卫。
+动态选项与结果页仍由原控制器负责；第一阶段范围和观察见[静态菜单整理记录](../../docs/channel-menu-consolidation.md)。
+`workspace-selection-presentation.ts` 从 Application 工作区列表生成原始 ID、名称、目录、原顺序编号和当前项标记，
+供共享文字格式器、Telegram 键盘、飞书选择卡和 QQ 工作区分页消费。渠道继续负责转义、截断、分页、按钮编码与交互有效性；
+投影不重新解释文字选择、不变更列表顺序、不查询或写入工作区状态。执行仍走原 Application 文字或精确 ID 入口。
 纯格式化实现分别位于
 `conversation-command-help.ts`、`conversation-session-command-format.ts`、
 `conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、

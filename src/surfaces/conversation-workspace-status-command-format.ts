@@ -14,19 +14,21 @@ import { formatCodexProviderLabel, formatServiceTierSetting } from "./provider-f
 import { formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
+import { createWorkspaceSelectionPresentation } from "./workspace-selection-presentation.js";
 
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
   formatLiteral: (value: string) => string = value => value,
 ): string {
+  const view = createWorkspaceSelectionPresentation(result);
   const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
   return toStructuredMarkdownList([
-    `Workspace（${result.workspaces.length}）：`,
-    ...(!result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId)
-      ? [`原选择已失效：${literal(result.currentWorkspaceId)}。请选择下列工作区后重新发起操作。`]
+    `Workspace（${view.entries.length}）：`,
+    ...(!view.currentWorkspace
+      ? [`原选择已失效：${literal(view.currentWorkspaceId)}。请选择下列工作区后重新发起操作。`]
       : []),
-    ...result.workspaces.flatMap((workspace, index) => [
-      `${index + 1}. ${literal(workspace.name)} · ${literal(workspace.id)}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
+    ...view.entries.flatMap((workspace) => [
+      `${workspace.position}. ${literal(workspace.name)} · ${literal(workspace.id)}${workspace.isCurrent ? " ← 当前" : ""}`,
       `- 工作目录：${literal(workspace.cwd)}`,
     ]),
     "",

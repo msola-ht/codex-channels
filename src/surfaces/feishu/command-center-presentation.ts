@@ -33,6 +33,7 @@ import type {
 import { escapeFeishuCardMarkdown } from "./message-content.js";
 import { renderFeishuCommandResult } from "./renderer.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
+import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
 
 const feishuQueueChoiceChunkSize = 13;
 
@@ -580,20 +581,21 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "workspace" && result.kind === "workspaces") {
-    if (result.workspaces.length === 0) {
+    const view = createWorkspaceSelectionPresentation(result);
+    if (view.entries.length === 0) {
       return undefined;
     }
     return {
       title: "选择工作区",
       description: [
         "### 当前工作区",
-        `- ${result.currentWorkspaceId}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效）"}`,
+        `- ${view.currentWorkspaceId}${view.currentWorkspace ? "" : "（已失效）"}`,
         "",
         "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
       ].join("\n"),
       descriptionFormat: "markdown",
-      choices: result.workspaces.map((workspace) => ({
-        label: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}${workspace.name}`,
+      choices: view.entries.map((workspace) => ({
+        label: `${workspace.isCurrent ? "✓ " : ""}${workspace.name}`,
         action: "workspace-select",
         input: workspace.id,
       })),
