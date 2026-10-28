@@ -707,7 +707,7 @@ export function renderCommandCenterChoices(
       ].join("\n"), presentation.entries.map(({ model, provider, position, isCurrent }) => ({
         description: `**${position}. ${choiceCardLiteral(modelListDisplayName(model.displayName, model.provider, model.model), 80)}**${isCurrent ? result.state.modelPending ? " · 已选" : " · 当前" : ""} · ${formatModelSpeedSupport(model)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `：${choiceCardLiteral(model.unavailableReason)}` : ""}` : ""}`,
         choice: {
-          label: choiceButtonLabel(formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))),
+          label: choiceButtonLabel(`${isCurrent ? result.state.modelPending ? "已选 · " : "当前 · " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}`),
           action: "model",
           input: String(position),
           modelSelection: { kind: "model", provider, model: model.model, snapshot },

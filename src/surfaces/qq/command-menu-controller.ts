@@ -778,7 +778,7 @@ export class QqCommandMenuController {
         next => ({ kind: "model-page", page: next, view, snapshot }), [], layout.columns);
     }
     const catalog = presentation.entries;
-    const labels = catalog.map(({ model, position }) => `${position} ${modelListEntry(model.displayName, model.provider, model.model).modelName}`);
+    const labels = catalog.map(({ model, position, isCurrent }) => `${isCurrent ? state.modelPending ? "已选 · " : "当前 · " : ""}${position} ${modelListEntry(model.displayName, model.provider, model.model).modelName}`);
     const layout = choiceLayout(labels);
     const entries = slicePage(catalog, page, layout.pageSize);
     const buttons = entries.flatMap(({ model, provider }, index) => model.available === false ? [] : [this.button(context, labels[(page - 1) * layout.pageSize + index]!, {
