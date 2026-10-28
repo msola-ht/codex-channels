@@ -724,12 +724,10 @@ function renderFeishuCategorizedCommandsCard(
     ]),
     sectionTitle("任务工具"),
     actionRow(token, [
-      menuAction("goal"),
       menuAction("plan", "切换 Plan 模式"),
       menuAction("schedule"),
     ]),
     actionRow(token, [
-      menuAction("queue", "原生队列"),
       menuAction("revert"),
     ]),
     actionRow(token, [
@@ -758,7 +756,7 @@ function renderFeishuCategorizedCommandsCard(
       ["飞书状态", "feishu-status", "default"],
       ["Doctor", "feishu-doctor", "default"],
     ]),
-    feishuCardPlainText("重命名、Review 和 Goal 打开输入或选项；点击“切换 Plan 模式”会直接请求切换。发送 /help 返回命令中心。"),
+    feishuCardPlainText("重命名和 Review 打开输入或选项；点击“切换 Plan 模式”会直接请求切换。发送 /help 返回命令中心。"),
   ]);
 }
 
