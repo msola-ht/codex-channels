@@ -77,6 +77,7 @@ import {
 } from "./format.js";
 import {
   decodeMarkdownBackslashEscapes,
+  splitTelegramHtml,
 } from "./markdown-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import {
@@ -85,13 +86,23 @@ import {
 } from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
+const maximumOperationMessageChunks = 8;
+
+function operationMessageChunks(html: string): string[] {
+  const chunks = splitTelegramHtml(html);
+  if (chunks.length > maximumOperationMessageChunks) {
+    throw new Error("Telegram 操作详情超出 8 条消息预算，未发送本次操作内容");
+  }
+  return chunks;
+}
+
 interface OperationLogState {
   chatId: string;
   turnKey: string;
   order: string[];
   records: Map<string, OperationUpdate>;
-  messageIds: Map<string, number>;
-  sentText: Map<string, string>;
+  messageIds: Map<string, number[]>;
+  sentText: Map<string, string[]>;
   refreshKey: string;
   timer: NodeJS.Timeout | undefined;
   releaseTimer?: (() => void) | undefined;
@@ -1076,23 +1087,7 @@ export class TelegramOutbox {
         state.records.delete(request.itemId);
         state.sentText.delete(request.itemId);
         state.order = state.order.filter((itemId) => itemId !== request.itemId);
-        const messageId = state.messageIds.get(request.itemId);
-        if (messageId !== undefined) {
-          state.messageIds.delete(request.itemId);
-          this.enqueue(
-            chatId,
-            (signal) => this.executor.call(
-              { chatId, operation: "deleteMessage", critical: true },
-              (requestSignal) => this.api.deleteMessage(
-                chatId,
-                messageId,
-                telegramAbortSignal(requestSignal),
-              ),
-              signal,
-            ).then(() => undefined),
-            true,
-          );
-        }
+        this.removeOperationMessages(state, request.itemId);
       }
       this.cancelOperationTimer(state);
       if (state.records.size === 0 && state.messageIds.size === 0) {
@@ -1122,27 +1117,33 @@ export class TelegramOutbox {
     state.records.delete(itemId);
     state.sentText.delete(itemId);
     state.order = state.order.filter((candidate) => candidate !== itemId);
-    const messageId = state.messageIds.get(itemId);
-    if (messageId !== undefined) {
-      state.messageIds.delete(itemId);
-      this.enqueue(
-        state.chatId,
-        (signal) => this.executor.call(
-          { chatId: state.chatId, operation: "deleteMessage", critical: true },
-          (requestSignal) => this.api.deleteMessage(
-            state.chatId,
-            messageId,
-            telegramAbortSignal(requestSignal),
-          ),
-          signal,
-        ).then(() => undefined),
-        true,
-      );
-    }
+    this.removeOperationMessages(state, itemId);
     if (state.records.size === 0 && state.messageIds.size === 0) {
       this.cancelOperationTimer(state);
       this.operationLogs.delete(turnKey);
     }
+  }
+
+  private removeOperationMessages(state: OperationLogState, itemId: string): void {
+    const messageIds = state.messageIds.get(itemId);
+    state.messageIds.delete(itemId);
+    if (!messageIds) return;
+    // Read the array only after the in-flight flush settles, including late confirmations.
+    this.enqueue(state.chatId, async (signal) => {
+      let failed = false;
+      let failure: unknown;
+      for (const messageId of messageIds) {
+        try {
+          await this.executor.call({ chatId: state.chatId, operation: "deleteMessage", critical: true },
+            (requestSignal) => this.api.deleteMessage(state.chatId, messageId, telegramAbortSignal(requestSignal)), signal);
+        } catch (error) {
+          if (signal.aborted || DeliveryReceipt.current()?.controller.signal.aborted) throw error;
+          if (!failed) failure = error;
+          failed = true;
+        }
+      }
+      if (failed) throw failure;
+    }, true);
   }
 
   private sealOperationLog(chatId: string, turnKey: string): void {
@@ -1180,12 +1181,9 @@ export class TelegramOutbox {
     this.enqueue(
       chatId,
       async (signal) => {
-        await this.sendOperationMessage(
-          chatId,
-          text,
-          undefined,
-          signal,
-        );
+        for (const chunk of operationMessageChunks(text)) {
+          await this.sendOperationMessage(chatId, chunk, undefined, signal);
+        }
       },
       true,
     );
@@ -1206,40 +1204,53 @@ export class TelegramOutbox {
       .map((itemId) => state.records.get(itemId))
       .filter((record): record is OperationUpdate => record !== undefined);
     for (const record of records) {
+      if (!state.records.has(record.itemId)) throw new Error("Telegram 操作展示已撤回");
       const text = isGeneratedImageUnavailable(record) ? generatedImageUnavailableText : formatOperationLog({
         order: [record.itemId],
         records: new Map([[record.itemId, record]]),
       }, display);
-      const messageId = state.messageIds.get(record.itemId);
-      if (messageId !== undefined && state.sentText.get(record.itemId) === text
-        && record.itemId !== confirmItemId) {
-        continue;
+      const chunks = operationMessageChunks(text);
+      const messageIds = state.messageIds.get(record.itemId) ?? [];
+      const sentText = state.sentText.get(record.itemId) ?? [];
+      state.messageIds.set(record.itemId, messageIds);
+      state.sentText.set(record.itemId, sentText);
+      const assertCurrent = (): void => {
+        if (state.messageIds.get(record.itemId) !== messageIds) throw new Error("Telegram 操作展示已撤回");
+      };
+      for (const [index, chunk] of chunks.entries()) {
+        assertCurrent();
+        const messageId = messageIds[index];
+        if (messageId !== undefined && sentText[index] === chunk && record.itemId !== confirmItemId) continue;
+        if (messageId === undefined) {
+          messageIds[index] = await this.sendOperationMessage(chatId, chunk, undefined, signal);
+        } else {
+          try {
+            await this.executor.editMessageText(
+              { chatId, critical: final || record.status !== "running" },
+              (requestSignal) => this.api.editMessageText(
+                chatId, messageId, chunk, operationEditOptions(), telegramAbortSignal(requestSignal),
+              ),
+              signal,
+            );
+          } catch (error) {
+            if ((!final && record.status === "running") || signal?.aborted || !isTelegramBadRequest(error)) throw error;
+            assertCurrent();
+            messageIds[index] = await this.sendOperationMessage(chatId, chunk, undefined, signal);
+          }
+        }
+        // Keep each confirmed part when a later part fails or is cancelled.
+        sentText[index] = chunk;
+        assertCurrent();
       }
-      if (messageId === undefined) {
-        state.messageIds.set(
-          record.itemId,
-          await this.sendOperationMessage(chatId, text, undefined, signal),
-        );
-        state.sentText.set(record.itemId, text);
-        continue;
+      while (messageIds.length > chunks.length) {
+        assertCurrent();
+        const messageId = messageIds.at(-1)!;
+        await this.executor.call({ chatId, operation: "deleteMessage", critical: true },
+          (requestSignal) => this.api.deleteMessage(chatId, messageId, telegramAbortSignal(requestSignal)), signal);
+        messageIds.pop();
+        sentText.pop();
+        assertCurrent();
       }
-      try {
-        await this.executor.editMessageText(
-          { chatId, critical: final || record.status !== "running" },
-          (requestSignal) => this.api.editMessageText(
-            chatId,
-            messageId,
-            text,
-            operationEditOptions(),
-            telegramAbortSignal(requestSignal),
-          ),
-          signal,
-        );
-      } catch (error) {
-        if (!final || signal?.aborted || !isTelegramBadRequest(error)) throw error;
-        state.messageIds.set(record.itemId, await this.sendOperationMessage(chatId, text, undefined, signal));
-      }
-      state.sentText.set(record.itemId, text);
     }
     if (final && this.operationLogs.get(turnKey) === state) {
       this.operationLogs.delete(turnKey);

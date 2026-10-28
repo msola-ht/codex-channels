@@ -21,12 +21,14 @@ export function renderFeishuComputerUseCard(
   record: OperationUpdate,
   display: Exclude<OperationUpdateDisplay, "hidden">,
 ): FeishuCardDocument {
-  const detail = record.detail === undefined ? "" : inlineOperationDetail(
+  const detail = record.detail === undefined ? "" : (
     display === "compact"
       ? compactOperationDetail(record.detail)
-      : safeOperationDetail(record, display),
+      : safeOperationDetail(record, display)
   );
-  const content = withOperationDurationFooter(detail ? `\`${detail}\`` : "", record.durationMs);
+  const content = withOperationDurationFooter(detail
+    ? display === "detailed" ? `\`\`\`text\n${detail}\n\`\`\`` : `\`${inlineOperationDetail(detail)}\``
+    : "", record.durationMs);
   return feishuCardShell(
     record.status === "running" ? "blue" : record.status === "completed" ? "green" : "grey",
     `${operationTitle(record)} · ${operationStatus(record.status)}`,
@@ -55,6 +57,8 @@ export function formatFeishuOperation(
     const detail = safeOperationDetail(record, display);
     if (record.kind === "command" && record.commandExploration === undefined) {
       lines.push("```shell", detail, "```");
+    } else if (display === "detailed") {
+      lines.push("```text", detail, "```");
     } else {
       lines.push(`具体内容：\`${inlineOperationDetail(detail)}\``);
     }
@@ -74,8 +78,9 @@ export function formatFeishuOperationSummary(
     "**工具查询 · 已完成**",
     ...groups.flatMap((group) => [
       `- ${group.label}：${group.count} 次`,
-      ...group.details.map((detail) =>
-        `  - \`${inlineOperationDetail(compactOperationDetail(detail.detail))}\`：${detail.count} 次`),
+      ...group.details.map((detail) => display === "detailed"
+        ? `明细：${detail.count} 次\n\`\`\`text\n${compactOperationDetail(detail.detail).replaceAll("```", "``\u200B`")}\n\`\`\``
+        : `  - \`${inlineOperationDetail(compactOperationDetail(detail.detail))}\`：${detail.count} 次`),
       ...(group.omittedDetailCount > 0
         ? [`  - 其余 ${group.omittedDetailCount} 项明细已省略`]
         : []),

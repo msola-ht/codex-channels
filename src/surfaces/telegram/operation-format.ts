@@ -61,8 +61,9 @@ export function formatTelegramOperationSummary(
     `<b>工具查询 · 已完成</b>${duration}`,
     ...groups.flatMap((group) => [
       `• ${group.label}：${group.count} 次`,
-      ...group.details.map((detail) =>
-        `  ◦ <code>${escapeTelegramHtml(compactOperationDetail(detail.detail))}</code>：${detail.count} 次`),
+      ...group.details.map((detail) => display === "detailed"
+        ? `明细：${detail.count} 次\n<pre><code>${escapeTelegramHtml(compactOperationDetail(detail.detail))}</code></pre>`
+        : `  ◦ <code>${escapeTelegramHtml(compactOperationDetail(detail.detail))}</code>：${detail.count} 次`),
       ...(group.omittedDetailCount > 0
         ? [`  ◦ 其余 ${group.omittedDetailCount} 项明细已省略`]
         : []),
@@ -95,7 +96,9 @@ function renderOperationRecords(
         ? detailedOperationDetail(record) : redactOperationDetail(record.detail));
       lines.push(record.kind === "command" && record.commandExploration === undefined
         ? `<pre><code class="language-shell">${detail}</code></pre>`
-        : record.commandExploration === undefined
+        : display === "detailed"
+          ? `<pre><code>${detail}</code></pre>`
+          : record.commandExploration === undefined
           ? `<blockquote>${detail}</blockquote>`
           : `<code>${detail}</code>`);
     }

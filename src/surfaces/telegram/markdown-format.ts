@@ -323,7 +323,11 @@ function escapeHtml(value: string): string {
 
 /** Split rendered HTML after parsing entities, reopening formatting across message boundaries. */
 export function formatMarkdownAsTelegramHtmlChunks(markdown: string): string[] {
-  const html = renderMarkdownAsTelegramHtml(markdown);
+  return splitTelegramHtml(renderMarkdownAsTelegramHtml(markdown));
+}
+
+/** Split HTML produced by this Surface, preserving literal entities and formatting. */
+export function splitTelegramHtml(html: string): string[] {
   const chunks: string[] = [];
   const open: Array<{ tag: string; html: string }> = [];
   let current = "";

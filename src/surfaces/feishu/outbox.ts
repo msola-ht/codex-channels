@@ -38,7 +38,7 @@ import type {
 } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
-import { FeishuMessageError } from "./message-error.js";
+import { FeishuMessageError, isFeishuBusinessRejection } from "./message-error.js";
 import { bindOutboxMessagePort, type FeishuMessagePort, type ObserveFeishuCardCreation } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
@@ -605,10 +605,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     try {
       await this.messagePort.updateCard(state.messageId, card, signal);
     } catch (error) {
-      if (signal?.aborted || event.operation.status === "running") throw error;
+      if (signal?.aborted || event.operation.status === "running" || !isFeishuBusinessRejection(error)) throw error;
       this.logger.warn(
         { component: "Feishu", fallback: "markdown", ...surfaceErrorMetadata(error) },
-        "飞书电脑与浏览器操作卡片更新失败，已改为发送终态消息",
+        "飞书电脑与浏览器操作卡片更新被拒绝，尝试发送独立终态消息",
       );
       await this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal);
     }

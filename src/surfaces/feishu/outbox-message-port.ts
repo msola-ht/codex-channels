@@ -1,7 +1,7 @@
 import { DeliveryReceipt, checkpointDelivery } from "../delivery-receipt.js";
 import { withFeishuSendGuard } from "./sdk-request-context.js";
 import type { FeishuCardDocument } from "./approval-card.js";
-import { FeishuMessageError } from "./message-error.js";
+import { FeishuMessageError, isFeishuBusinessRejection } from "./message-error.js";
 import type { ChannelFileMediaType } from "../bounded-local-file.js";
 
 /** Observe verified creation independently of the cancellable delivery receipt. */
@@ -44,7 +44,8 @@ export interface FeishuMessagePort {
 
 /** 所有 Outbox 平台操作共用一个生命周期边界，包括可选媒体、回复与原地更新。 */
 export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSignal): FeishuMessagePort {
-  async function send<T>(request: (signal: AbortSignal) => Promise<T>, external?: AbortSignal): Promise<T> {
+  async function send<T>(request: (signal: AbortSignal) => Promise<T>, external?: AbortSignal,
+    definitelyRejected?: (error: unknown) => boolean): Promise<T> {
     const signal = external === undefined ? closed : AbortSignal.any([closed, external]);
     signal.throwIfAborted();
     const receipt = DeliveryReceipt.current();
@@ -55,7 +56,8 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
     };
     beforeSend();
     const result = await checkpointDelivery("feishu-message", () => withFeishuSendGuard(signal, beforeSend, () => request(signal)),
-      (error) => error instanceof FeishuMessageError && error.code === "card-create-failed");
+      (error) => error instanceof FeishuMessageError && error.code === "card-create-failed"
+        || definitelyRejected?.(error) === true);
     signal.throwIfAborted();
     return result;
   }
@@ -65,7 +67,7 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
     sendMarkdownCard: (chatId, text, signal) => send((active) => port.sendMarkdownCard(chatId, text, active), signal),
     sendCard: (chatId, card, signal, observeCreation) => send((active) => observeCreation === undefined
       ? port.sendCard(chatId, card, active) : port.sendCard(chatId, card, active, observeCreation), signal),
-    updateCard: (id, card, signal) => send((active) => port.updateCard(id, card, active), signal),
+    updateCard: (id, card, signal) => send((active) => port.updateCard(id, card, active), signal, isFeishuBusinessRejection),
     createStreamingCard: (chatId, text, signal) => send((active) => port.createStreamingCard(chatId, text, active), signal),
     updateStreamingCard: (id, text, sequence, signal) => send((active) => port.updateStreamingCard(id, text, sequence, active), signal),
     finishStreamingCard: (id, sequence, text, signal) => send((active) => port.finishStreamingCard(id, sequence, text, active), signal),
