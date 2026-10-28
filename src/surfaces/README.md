@@ -248,7 +248,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书、微信与 QQ 的严格斜杠命令解析，并规范化四渠道共同公开的
 `/h`、`/work`、`/r`、`/skills` 别名；Telegram 在 Bot 注册边界接入同一组显式映射。
-`conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。
+`conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。共享发现策略隐藏 Queue／Goal 的帮助与 Telegram 菜单入口，不改变命令处理器准入；QQ、飞书静态菜单同样不展示两项。
 飞书和 QQ 的静态菜单引用该目录，保留渠道标签覆盖、分组、行列与导航；Telegram 的注册说明直接消费目录，
 飞书、Telegram 和微信的文字帮助由 `conversation-command-help.ts` 的结构化用法生成。
 目录不是能力或授权表，不接收外部输入，不替代 QQ 的参数准入、飞书实际卡片的动作集合或任何交互守卫。

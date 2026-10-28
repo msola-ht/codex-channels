@@ -166,7 +166,7 @@ Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 H
 不建立渠道私有 Queue 状态。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
-分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，
+分组列表，只在 Telegram 边界转换为安全 HTML。Queue／Goal 从原生命令菜单及帮助中隐藏，原处理器与手动命令保留；菜单过滤只在生命周期注册输出中使用，不过滤执行注册。无参数 `/skill` 与其他渠道一样展示编号列表，
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 `/plugin` 在共享文字列表上增加当前页可调用项和未过滤列表的翻页按钮；选择后通过一次性
 ForceReply 收集任务，再使用完整 Plugin ID 进入共享 Application 调用边界。搜索结果仍保留

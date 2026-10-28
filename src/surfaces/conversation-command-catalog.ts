@@ -1,5 +1,10 @@
 import type { ConversationCommandName } from "../application/index.js";
 
+/** Discovery only: hidden commands remain supported by the original command handlers. */
+export function isConversationCommandVisible(name: ConversationCommandName): boolean {
+  return name !== "queue" && name !== "goal";
+}
+
 /** Presentation metadata only. Application and channel handlers still own admission and execution. */
 export const conversationCommandCatalog = {
   resume: { label: "会话切换", description: "列出或恢复 Codex 会话" },

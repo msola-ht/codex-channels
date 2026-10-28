@@ -49,12 +49,12 @@ export function qqMenuButton(id: string, label: string, data: string, enter = tr
 export function renderQqCommandMenu(): { content: string; keyboard: QqCommandKeyboard } {
   const button = qqMenuButton;
   return {
-    content: "## Codex 命令中心\n\n常用操作直接点击；设置与管理功能按分类展开。",
+    content: "## Codex 命令中心\n\n### 常用操作\n\n- 当前状态、停止任务、新会话\n- 模型、思考等级与 Fast\n- 工作区、历史会话与账户用量\n\n### 分类入口\n\n- 请求统计、会话管理、会话偏好\n- 能力集成、任务工具、账户工具\n\n点击分类继续查看；填写类按钮会填入原命令，补齐内容后再发送。Fast 先查看当前速度设置。",
     keyboard: { content: { rows: [
-      { buttons: [commandButton("new"), commandButton("status"), commandButton("stop")] },
-      { buttons: [button("model", "选择模型", "/help model 1"), commandButton("effort"), commandButton("fast-status", { id: "fast" })] },
-      { buttons: [button("workspace", "工作区", "/help workspace 1"), button("sessions", "历史会话", "/help sessions 1"), commandButton("usage", { label: "用量" })] },
-      { buttons: [button("metrics", "统计", "/help metrics"), button("manage", "会话操作", "/help manage"), button("settings", "偏好设置", "/help settings")] },
+      { buttons: [commandButton("status"), commandButton("stop"), commandButton("new")] },
+      { buttons: [button("model", "选择模型", "/help model 1"), commandButton("effort"), commandButton("fast-status", { id: "fast", label: "Fast" })] },
+      { buttons: [button("workspace", "工作区", "/help workspace 1"), button("sessions", "历史会话", "/help sessions 1"), commandButton("usage", { label: "账户用量" })] },
+      { buttons: [button("metrics", "请求统计", "/help metrics"), button("manage", "会话管理", "/help manage"), button("settings", "会话偏好", "/help settings")] },
       { buttons: [button("extensions", "能力集成", "/help extensions"), button("tasks", "任务工具", "/help tasks"), button("account", "账户工具", "/help account")] },
     ] } },
   };
@@ -105,10 +105,10 @@ export function renderQqStaticCommandMenu(input: string): { content: string; key
     ] } },
   };
   if (input === "tasks") return {
-    content: "## 任务工具\n\n### 任务操作\n\n- Diff：查看当前改动\n- Review：选择审查目标\n- 原生队列：管理排队输入\n- 计划任务：查看与管理定时任务\n\n点击下方操作；计划需求需填写后发送。",
+    content: "## 任务工具\n\n### 任务操作\n\n- Diff：查看当前改动\n- Review：选择审查目标\n- 计划任务：查看与管理定时任务\n\n点击下方操作；计划需求需填写后发送。",
     keyboard: { content: { rows: [
       { buttons: [commandButton("diff"), qqMenuButton("review", "Review", "/help review")] },
-      { buttons: [qqMenuButton("queue", "原生队列", "/help queue"), commandButton("schedule")] },
+      { buttons: [commandButton("schedule")] },
       { buttons: [commandButton("plan-request", { id: "planrequest", enter: false })] },
       { buttons: [homeButton()] },
     ] } },
@@ -122,15 +122,15 @@ export function renderQqStaticCommandMenu(input: string): { content: string; key
     ] } },
   };
   if (input === "settings") return {
-    content: "## 偏好设置\n\n### 当前会话设置\n\n- Goal：查询或清除目标\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
+    content: "## 会话偏好\n\n### 当前会话设置\n\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
     keyboard: { content: { rows: [
-      { buttons: [commandButton("goal"), commandButton("plan")] },
+      { buttons: [commandButton("plan")] },
       { buttons: [commandButton("autoreview", { label: "会话审批方式" }), commandButton("permissions")] },
       { buttons: [homeButton()] },
     ] } },
   };
   if (input === "manage") return {
-    content: "## 会话操作\n\n### 当前会话\n\n- 归档、分叉、重命名\n- 固定、取消固定、释放占用\n- 历史回退、压缩上下文\n\n归档会退出当前会话；恢复入口位于“已归档会话”。",
+    content: "## 会话管理\n\n### 当前会话\n\n- 归档、分叉、重命名\n- 固定、取消固定、释放占用\n- 历史回退、压缩上下文\n\n归档会退出当前会话；恢复入口位于“已归档会话”。",
     keyboard: { content: { rows: [
       { buttons: [commandButton("archive"), qqMenuButton("archived", "已归档会话", "/help archived 1")] },
       { buttons: [commandButton("fork"), commandButton("rename", { enter: false })] },

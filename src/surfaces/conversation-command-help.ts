@@ -1,5 +1,6 @@
 import type { ConversationCommandName } from "../application/index.js";
 import { surfaceCommandAliases } from "./slash-command.js";
+import { isConversationCommandVisible } from "./conversation-command-catalog.js";
 
 export { conversationCommandDescriptions } from "./conversation-command-catalog.js";
 
@@ -104,16 +105,18 @@ const helpSections = [
 /** 保留既有帮助出口，命令文本只从结构化片段生成。 */
 export const conversationCommandHelpSections = helpSections.map((section) => ({
   title: section.title,
-  lines: section.lines.map((helpLine) => {
+  lines: section.lines.flatMap((helpLine) => {
     if ("alias" in helpLine) {
-      return `/${helpLine.alias} → /${surfaceCommandAliases[helpLine.alias]}`;
+      return [`/${helpLine.alias} → /${surfaceCommandAliases[helpLine.alias]}`];
     }
-    const command = helpLine.commands.map((usage) =>
+    const visible = helpLine.commands.filter(usage => isConversationCommandVisible(usage.name));
+    if (visible.length === 0) return [];
+    const command = visible.map((usage) =>
       `/${usage.alias ?? usage.name}${usage.argumentsText.length > 0 ? ` ${usage.argumentsText}` : ""}`,
     ).join(" · ");
-    return helpLine.description === undefined
+    return [helpLine.description === undefined
       ? command
-      : { command, description: helpLine.description };
+      : { command, description: helpLine.description }];
   }),
 }));
 

@@ -5,7 +5,7 @@ import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostic
 import {
   conversationCommandNames,
 } from "../../application/index.js";
-import { conversationCommandCatalog } from "../conversation-command-catalog.js";
+import { conversationCommandCatalog, isConversationCommandVisible } from "../conversation-command-catalog.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -17,7 +17,7 @@ export function telegramConversationCommandName(name: string): string {
 
 const commands = [
   { command: "start", description: "使用说明" },
-  ...conversationCommandNames.map((name) => ({
+  ...conversationCommandNames.filter(isConversationCommandVisible).map((name) => ({
     command: telegramConversationCommandName(name),
     description: conversationCommandCatalog[name].description,
   })),
