@@ -61,6 +61,8 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
+  telegramHelpCommand,
+  telegramHelpKeyboard,
   threadAutoReviewKeyboard,
   scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
@@ -577,28 +579,34 @@ export class TelegramSurface {
         .map(([alias]) => telegramConversationCommandName(alias)),
     ];
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
-    this.bot.command(["start", ...commandNames("help")], (context) =>
-      replyTelegramPanel(
-        context,
-        [
-          "## Codex Connect Gateway",
-          "",
-          "普通文本会发送到当前 Codex Session。",
-          "",
-          ...conversationCommandQuickStartLines,
-          "### 消息与附件",
-          "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
-          "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
-          "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
-          "没有绑定会话时会新建会话；继续历史会话请使用 /resume 显式选择。",
-          "",
-          ...conversationCommandHelpLines,
-          "Telegram：",
-          "- /whoami",
-          "- /start · /help · /h",
-        ].join("\n"),
-      ),
-    );
+    this.bot.command(["start", ...commandNames("help")], context => this.renderHelp(context, "home"));
+    this.bot.callbackQuery(/^help:([a-z]+)$/, async context => {
+      const action = context.match[1]!;
+      if (action === "home" || action === "more" || action === "guide") {
+        await context.answerCallbackQuery();
+        await this.renderHelp(context, action);
+        return;
+      }
+      const command = telegramHelpCommand(action);
+      if (!command) throw new UserFacingError("command.unsupported", "该帮助按钮不支持此操作，请重新发送 /help");
+      if (command === "stop") {
+        // Attachment cancellation was registered in platform receive order.
+        // A failed/slow callback ACK must not prevent the original /stop.
+        const cancelledInteraction = this.interactions.stopForChat(target(context).conversationId);
+        const acknowledged = context.answerCallbackQuery().catch(error => {
+          this.logger.warn(telegramErrorMetadata(error), "Telegram 停止按钮回执失败");
+        });
+        try {
+          await this.executeCommand(context, command, "");
+          if (cancelledInteraction) await this.replyHelpPanel(context, interactionStoppedText);
+        } finally {
+          await acknowledged;
+        }
+        return;
+      }
+      await context.answerCallbackQuery();
+      await this.executeCommand(context, command, command === "fast" ? "status" : "");
+    });
     for (const command of conversationCommandNames.filter(
       (candidate) => candidate !== "stop",
     )) {
@@ -1557,15 +1565,60 @@ export class TelegramSurface {
     return sequence;
   }
 
+  private async renderHelp(context: Context, page: "home" | "more" | "guide"): Promise<void> {
+    const text = page === "guide" ? [
+      "## 完整命令用法",
+      ...conversationCommandQuickStartLines,
+      "### 消息与附件",
+      "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
+      "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
+      "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
+      "没有绑定会话时会新建会话；继续历史会话请使用 /resume 显式选择。",
+      "",
+      ...conversationCommandHelpLines,
+      "Telegram：",
+      "- /whoami",
+      "- /start · /help · /h",
+    ].join("\n") : page === "home" ? [
+      "## Codex 命令中心",
+      "选择下方操作；普通文本仍会发送到当前 Codex Session。",
+      "停止任务、新会话会直接执行；模型、工作区和会话入口打开选择列表。",
+    ].join("\n") : [
+      "## 更多操作",
+      "选择下方入口查看列表、状态或诊断；调用、修改及确认继续沿用原命令。",
+      "完整参数、其他命令与附件说明见“完整用法”。",
+    ].join("\n");
+    await this.replyHelpPanel(context, text, telegramHelpKeyboard(page));
+  }
+
+  private async replyHelpPanel(context: Context, text: string, keyboard?: InlineKeyboardMarkup): Promise<void> {
+    const original = this.commandReplies.get(context);
+    if (!original || !context.from) throw new UserFacingError("command.authorization-changed", "帮助入口已失效，请重新发送 /help");
+    const inputTarget = target(context);
+    const actorId = String(context.from.id);
+    await this.outbox.runOrdered(inputTarget.conversationId, async signal => {
+      await replyTelegramPanel(context, text, keyboard, (chunk, options) => this.apiExecutor.call({
+        chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
+      }, requestSignal => {
+        original.signal.throwIfAborted();
+        if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) {
+          throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+        }
+        return context.reply(chunk, options, telegramAbortSignal(requestSignal));
+      }, signal));
+    }, original.signal);
+  }
+
   private async executeCommand(
     context: Context,
     command: ConversationCommandName,
+    argumentsText = commandArguments(context),
   ): Promise<void> {
     if (!context.from) throw new UserFacingError("command.authorization-changed", "无法确认命令操作者");
     const result = await this.commands.execute(
       target(context),
       command,
-      commandArguments(context),
+      argumentsText,
       String(context.from.id),
     );
     if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
@@ -1740,11 +1793,13 @@ export class TelegramSurface {
   private receiveAttachmentUpdate(update: Context["update"]): (() => void) | undefined {
     this.receivedUpdates.add(update);
     const message = update.message;
-    if (!message?.from || message.chat.type !== "private" || this.stopping) return;
+    const chat = message?.chat ?? update.callback_query?.message?.chat;
+    const actor = message?.from ?? update.callback_query?.from;
+    if (!actor || chat?.type !== "private" || this.stopping) return;
     const inputTarget: ConversationTarget = {
-      surface: "telegram", accountId: this.accountId, conversationId: String(message.chat.id),
+      surface: "telegram", accountId: this.accountId, conversationId: String(chat.id),
     };
-    const actorId = String(message.from.id);
+    const actorId = String(actor.id);
     const allowed = () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId });
     if (allowed()) this.rememberPrivateConversation(inputTarget, actorId);
     if (isTelegramEmergencyStopUpdate(update, this.bot)) {
@@ -1756,6 +1811,7 @@ export class TelegramSurface {
       if (stop.cancelled) this.attachmentStops.add(update);
       return stop;
     }
+    if (!message) return;
     const kind = message.voice || message.audio ? "audio"
       : message.video || message.video_note || (message.document && isVideoDocument(message.document.mime_type, message.document.file_name))
         ? "video" : undefined;

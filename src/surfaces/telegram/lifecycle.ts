@@ -413,6 +413,7 @@ export function isTelegramEmergencyStopUpdate(
   update: Parameters<Bot["handleUpdate"]>[0],
   bot: Pick<Bot, "api" | "botInfo">,
 ): boolean {
+  if (update.callback_query?.data === "help:stop") return true;
   const context = new Context(update, bot.api, bot.botInfo);
   return Context.has.command("stop")(context) && String(context.match).trim().length === 0;
 }

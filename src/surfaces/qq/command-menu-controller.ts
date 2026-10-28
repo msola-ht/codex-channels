@@ -773,7 +773,7 @@ export class QqCommandMenuController {
         kind: "model", selection: { kind: "browse-provider", provider, snapshot },
       }, QQ_BUTTON_LABEL_CHARACTERS));
       const lines = [current, "### 提供商列表\n", ...entries.map(({ id: provider, position, isCurrent }) =>
-        `**${position}. ${markdown(formatCodexProviderLabel(provider), 100)}**${isCurrent && state.modelProvider !== undefined ? state.providerPending ? " · 已选" : " · 当前" : ""}\n\n${markdown(formatProviderModelSummary(state.models, provider), 180)}\n`), "\n点击下方提供商，继续选择模型。"];
+        `**${position}. ${markdown(formatCodexProviderLabel(provider), 100)}**${isCurrent && state.modelProvider !== undefined ? state.providerPending ? " · 已选" : " · 当前" : ""} · ${markdown(formatProviderModelSummary(state.models, provider), 180)}\n`), "\n点击下方提供商，继续选择模型。"];
       return this.listPanel(context, "选择提供商", lines, buttons, page, Math.ceil(providers.length / layout.pageSize),
         next => ({ kind: "model-page", page: next, view, snapshot }), [], layout.columns);
     }

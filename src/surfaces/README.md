@@ -250,7 +250,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `/h`、`/work`、`/r`、`/skills` 别名；Telegram 在 Bot 注册边界接入同一组显式映射。
 `conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。共享发现策略隐藏 Queue／Goal 的帮助与 Telegram 菜单入口，不改变命令处理器准入；QQ、飞书静态菜单同样不展示两项。
 飞书和 QQ 的静态菜单引用该目录，保留渠道标签覆盖、分组、行列与导航；Telegram 的注册说明直接消费目录，
-飞书、Telegram 和微信的文字帮助由 `conversation-command-help.ts` 的结构化用法生成；Telegram／微信在渠道入口前置该模块从共享目录生成的常用命令摘要。文字模型、工作区和会话清单的分段与状态语义由共享格式器维护，各端继续负责 HTML／Markdown 和实际消息发送。
+飞书、Telegram 和微信的文字帮助由 `conversation-command-help.ts` 的结构化用法生成；微信在帮助入口前置共享常用命令摘要，Telegram 默认打开按钮首页，“完整用法”保留共享摘要与完整说明。文字模型、工作区和会话清单的分段与状态语义由共享格式器维护，各端继续负责 HTML／Markdown 和实际消息发送；Telegram 历史／归档选择紧凑条目间距，其他消费者保留原默认间距。
 目录不是能力或授权表，不接收外部输入，不替代 QQ 的参数准入、飞书实际卡片的动作集合或任何交互守卫。
 动态选项与结果页仍由原控制器负责；整理成果、后续布局范围及待验收项见[四渠道菜单现状与下一步](../../docs/channel-menu-consolidation.md)。
 `workspace-selection-presentation.ts` 从 Application 工作区列表生成原始 ID、名称、目录、原顺序编号和当前项标记，

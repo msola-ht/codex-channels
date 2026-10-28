@@ -16,6 +16,7 @@ export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
   formatLiteral: (value: string) => string = value => value,
   formatCommand?: (value: string) => string,
+  entryLayout: "spaced" | "compact" = "spaced",
 ): string {
   const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
   const command = (value: string): string => {
@@ -36,7 +37,7 @@ export function formatConversationSessions(
       ({ session, selector, isCurrent, isBackground }) =>
         [
           `${selector}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${isCurrent ? " · 当前" : isBackground ? " · 后台运行" : ""}`,
-          "",
+          ...(entryLayout === "spaced" ? [""] : []),
           ...(session.model ? [`- 模型：${literal(session.model)}`] : []),
           ...(session.reasoningEffort ? [`- ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}`] : []),
           ...(session.modelProvider ? [`- Provider：${literal(formatDisplayedProvider(session.modelProvider))}`] : []),
@@ -46,7 +47,7 @@ export function formatConversationSessions(
     ),
     ...(result.pageCount > 1
       ? [
-          "",
+          ...(entryLayout === "spaced" ? [""] : []),
           ...(result.page > 1
             ? [`- 上一页：${command(formatSessionListCommand(result, result.page - 1))}`]
             : []),
@@ -55,7 +56,7 @@ export function formatConversationSessions(
             : []),
         ]
       : []),
-    "",
+    ...(entryLayout === "spaced" || result.pageCount > 1 ? [""] : []),
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Session ID>"
       : "恢复：/resume <序号、名称或 Session ID>",

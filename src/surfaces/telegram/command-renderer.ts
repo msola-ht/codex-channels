@@ -5,9 +5,11 @@ import type { InlineKeyboardMarkup } from "grammy/types";
 
 import type {
   ConversationCommandResult,
+  ConversationCommandName,
   ModelSelectionState,
 } from "../../application/index.js";
 import { formatCodexProviderLabel, formatProviderModelSummary, modelListDisplayName } from "../provider-format.js";
+import { conversationCommandCatalog } from "../conversation-command-catalog.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -26,6 +28,7 @@ import {
 } from "../conversation-model-account-command-format.js";
 import {
   formatConversationThreadQueue,
+  formatConversationSessions,
   formatThreadQueueInputTypeLabel,
   isTurnLifecycleAcknowledgedOutcome,
 } from "../conversation-session-command-format.js";
@@ -49,6 +52,9 @@ export async function renderTelegramCommandResult(
   const panel = (text: string, markup?: InlineKeyboardMarkup): Promise<void> =>
     replyTelegramPanel(context, text, markup, reply);
   switch (result.kind) {
+    case "sessions":
+      await panel(formatConversationSessions(result, undefined, undefined, "compact"));
+      return;
     case "outcome": {
       if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
         return;
@@ -175,6 +181,37 @@ export function hookKeyboard(
       callback_data: `hooks:${choice.input.replace(" ", ":")}`,
     }]),
   };
+}
+
+const telegramHelpCommands = [
+  ["status", "stop", "new"],
+  ["resume", "workspace"],
+  ["model", "effort", "fast"],
+  ["usage", "metrics", "limits"],
+] as const satisfies readonly (readonly ConversationCommandName[])[];
+const telegramMoreCommands = [
+  ["sessions", "archived", "schedule"],
+  ["skill", "agents", "plugin"],
+  ["mcp", "hooks", "permissions"],
+  ["autoreview", "release"],
+] as const satisfies readonly (readonly ConversationCommandName[])[];
+
+export function telegramHelpCommand(action: string): ConversationCommandName | undefined {
+  return [...telegramHelpCommands.flat(), ...telegramMoreCommands.flat()].find(command => command === action);
+}
+
+export function telegramHelpKeyboard(page: "home" | "more" | "guide"): InlineKeyboardMarkup {
+  const rows = page === "guide" ? [] : (page === "home" ? telegramHelpCommands : telegramMoreCommands).map(row => row.map(command => ({
+    text: command === "fast" ? "Fast" : command === "release" ? "占用诊断" : conversationCommandCatalog[command].label,
+    callback_data: `help:${command}`,
+  })));
+  return { inline_keyboard: [...rows, page === "home" ? [
+    { text: "更多操作", callback_data: "help:more" },
+    { text: "完整用法", callback_data: "help:guide" },
+  ] : [
+    { text: "返回首页", callback_data: "help:home" },
+    ...(page === "more" ? [{ text: "完整用法", callback_data: "help:guide" }] : []),
+  ]] };
 }
 
 export function threadAutoReviewKeyboard(token: string): InlineKeyboardMarkup {
