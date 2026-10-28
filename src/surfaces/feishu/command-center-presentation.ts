@@ -597,29 +597,23 @@ export function renderCommandCenterChoices(
     if (view.entries.length === 0) {
       return undefined;
     }
-    return {
-      title: "工作区",
-      description: [
+    return paginatedChoiceList("工作区", [
         "### 当前工作区",
         `- ${choiceCardLiteral(view.currentWorkspaceId)}${view.currentWorkspace ? "" : "（已失效）"}`,
         "",
         "### 工作区清单",
-        ...view.entries.slice(0, 18).flatMap(workspace => [
+      ].join("\n"), view.entries.map(workspace => ({
+        description: [
           `**${workspace.position}. ${choiceCardLiteral(workspace.name, 80)}**${workspace.isCurrent ? " · 当前" : ""}`,
           "",
           `目录：${choiceCardLiteral(workspace.cwd, 160)}`,
-          "",
-        ]),
-        "",
-        "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
-      ].join("\n"),
-      descriptionFormat: "lark_md",
-      choices: view.entries.map((workspace) => ({
-        label: choiceButtonLabel(`${workspace.position} · ${formatModelSettingLiteral(workspace.name)}`),
-        action: "workspace-select",
-        input: workspace.id,
-      })),
-    };
+        ].join("\n"),
+        choice: {
+          label: choiceButtonLabel(`${workspace.position} · ${formatModelSettingLiteral(workspace.name)}`),
+          action: "workspace-select",
+          input: workspace.id,
+        },
+      })), "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。");
   }
   if (action === "permissions" && result.kind === "permissions") {
     return {
@@ -676,51 +670,42 @@ export function renderCommandCenterChoices(
       return undefined;
     }
     if (result.state.providerFilter === undefined) {
-      return {
-        title: "选择提供商",
-        description: [
+      return paginatedChoiceList("选择提供商", [
           "### 当前模型",
           ...settingLines,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
           "",
           "### 提供商清单",
-          ...presentation.providers.slice(0, 18).map(({ id, position, isCurrent }) =>
-            `${position}. **${choiceCardLiteral(formatCodexProviderLabel(id), 80)}**${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? " · 已选" : " · 当前" : ""} · ${choiceCardLiteral(formatProviderModelSummary(result.state.models, id))}`
-          ),
-        ].join("\n"),
-        descriptionFormat: "lark_md",
-        choices: presentation.providers.map(({ id: provider, position }) => ({
-          label: choiceButtonLabel(`${position} · ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`),
-          action: "model",
-          input: provider,
-          modelSelection: { kind: "browse-provider", provider, snapshot },
-        })),
-      };
+        ].join("\n"), presentation.providers.map(({ id: provider, position, isCurrent }) => ({
+          description: `${position}. **${choiceCardLiteral(formatCodexProviderLabel(provider), 80)}**${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? " · 已选" : " · 当前" : ""} · ${choiceCardLiteral(formatProviderModelSummary(result.state.models, provider))}`,
+          choice: {
+            label: choiceButtonLabel(`${position} · ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`),
+            action: "model",
+            input: provider,
+            modelSelection: { kind: "browse-provider", provider, snapshot },
+          },
+        })));
     }
-    return {
-      title: "选择模型",
-      description: [
+    return paginatedChoiceList("选择模型", [
         "### 当前设置",
         ...settingLines,
         `- 浏览 Provider：${choiceCardLiteral(formatCodexProviderLabel(result.state.providerFilter))}`,
         "",
-        "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。",
+        presentation.entries.length > 0
+          ? "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。"
+          : "当前提供商没有可选模型，请返回提供商重新选择。",
         "",
         "### 模型清单",
-        ...presentation.entries.slice(0, 18).flatMap(({ model, position, isCurrent }) => [
-          `**${position}. ${choiceCardLiteral(modelListDisplayName(model.displayName, model.provider, model.model), 80)}**${isCurrent ? result.state.modelPending ? " · 已选" : " · 当前" : ""} · ${formatModelSpeedSupport(model)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `：${choiceCardLiteral(model.unavailableReason)}` : ""}` : ""}`,
-          "",
-        ]),
-      ].join("\n"),
-      descriptionFormat: "lark_md",
-      choices: presentation.entries.map(({ model, provider, position }) => ({
-        label: choiceButtonLabel(formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))),
-        action: "model",
-        input: String(position),
-        modelSelection: { kind: "model", provider, model: model.model, snapshot },
-      })),
-    };
+      ].join("\n"), presentation.entries.map(({ model, provider, position, isCurrent }) => ({
+        description: `**${position}. ${choiceCardLiteral(modelListDisplayName(model.displayName, model.provider, model.model), 80)}**${isCurrent ? result.state.modelPending ? " · 已选" : " · 当前" : ""} · ${formatModelSpeedSupport(model)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `：${choiceCardLiteral(model.unavailableReason)}` : ""}` : ""}`,
+        choice: {
+          label: choiceButtonLabel(formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))),
+          action: "model",
+          input: String(position),
+          modelSelection: { kind: "model", provider, model: model.model, snapshot },
+        },
+      })), undefined, [{ label: "返回提供商", action: "model", input: "" }]);
   }
   if (action === "effort") {
     const efforts = currentModel?.supportedReasoningEfforts ?? [];
@@ -773,6 +758,37 @@ export function renderCommandCenterChoices(
     };
   }
   return undefined;
+}
+
+/** Paginate only presentation; retain original identities and model snapshots on every page. */
+function paginatedChoiceList(
+  title: string,
+  header: string,
+  entries: ReadonlyArray<{ description: string; choice: FeishuCommandCenterChoices["choices"][number] }>,
+  footer?: string,
+  returnChoices: FeishuCommandCenterChoices["choices"] = [],
+): FeishuCommandCenterChoices {
+  const pageSize = 15;
+  const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+  const selectPage = (page: number): FeishuCommandCenterChoices => {
+    if (!Number.isSafeInteger(page) || page < 1 || page > pageCount) {
+      throw new UserFacingError("command.unsupported", "选择列表页码无效，请重新打开");
+    }
+    const visible = entries.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      title: pageCount > 1 ? `${title} · 第 ${page}/${pageCount} 页` : title,
+      description: [header, ...visible.map(entry => entry.description), ...(footer ? [footer] : [])].join("\n\n"),
+      descriptionFormat: "lark_md",
+      ...(pageCount > 1 ? { selectPage } : {}),
+      choices: [
+        ...visible.map(entry => entry.choice),
+        ...(page > 1 ? [{ label: "上一页", action: "choices-page" as const, input: String(page - 1) }] : []),
+        ...(page < pageCount ? [{ label: "下一页", action: "choices-page" as const, input: String(page + 1) }] : []),
+        ...returnChoices,
+      ],
+    };
+  };
+  return selectPage(1);
 }
 
 function scheduleChoiceSummary(

@@ -35,6 +35,8 @@ export const feishuCommandMenuEventKey = "codexc_home";
 
 const feishuLocalCommandActions = [
   "help",
+  "home",
+  "choices-page",
   "whoami",
   "feishu-status",
   "feishu-doctor",
@@ -73,6 +75,7 @@ export interface FeishuCommandCenterChoices {
   title: string;
   description?: string;
   descriptionFormat?: "plain_text" | "lark_md" | "markdown";
+  selectPage?: (page: number) => FeishuCommandCenterChoices;
   choices: ReadonlyArray<{
     label: string;
     action: FeishuCommandCenterAction;
@@ -116,6 +119,7 @@ interface PendingCommandCenter {
   allowedSelections: ReadonlySet<string>;
   acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState>;
   modelSelections: ReadonlyMap<string, ModelSelectionRequest>;
+  selectPage?: (page: number) => FeishuCommandCenterChoices;
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
   limitsQueryInFlight?: boolean;
@@ -188,9 +192,15 @@ export class FeishuCommandCenter {
     response: FeishuCommandCenterResponse,
     assertActive?: () => void,
     replaceMessageId?: string,
+    expiresAt?: number,
   ): Promise<void> {
     const responseGuard = "choices" in response ? response.assertActive : undefined;
-    const guard = assertActive || responseGuard ? (): void => { assertActive?.(); responseGuard?.(); } : undefined;
+    const guard = assertActive || responseGuard || expiresAt !== undefined ? (): void => {
+      assertActive?.(); responseGuard?.();
+      if (expiresAt !== undefined && expiresAt <= this.now()) {
+        throw new UserFacingError("command.authorization-changed", "选择卡片已过期，请重新打开");
+      }
+    } : undefined;
     return this.openCard(
       target,
       actorId,
@@ -223,6 +233,8 @@ export class FeishuCommandCenter {
         : new Map(),
       guard,
       responseGuard,
+      "choices" in response ? response.selectPage : undefined,
+      expiresAt,
     );
   }
 
@@ -283,6 +295,8 @@ export class FeishuCommandCenter {
     modelSelections: ReadonlyMap<string, ModelSelectionRequest> = new Map(),
     assertActive?: () => void,
     selectionGuard?: () => void,
+    selectPage?: (page: number) => FeishuCommandCenterChoices,
+    expiresAt?: number,
   ): Promise<void> {
     assertActive?.();
     if (
@@ -313,10 +327,11 @@ export class FeishuCommandCenter {
       target,
       actorId,
       messageId,
-      expiresAt: this.now() + tokenTtlMs,
+      expiresAt: Math.min(this.now() + tokenTtlMs, expiresAt ?? Infinity),
       allowedSelections: collectCommandSelections(card, token),
       acceptedStates,
       modelSelections,
+      ...(selectPage ? { selectPage } : {}),
       ...(form ? { form } : {}),
       consumeOnUse,
       ...(selectionGuard ? { assertActive: selectionGuard } : {}),
@@ -484,7 +499,15 @@ export class FeishuCommandCenter {
     void this.track(
       (async () => {
         try {
-          if (resolvedCommand === "help") {
+          if (resolvedCommand === "choices-page") {
+            if (!pending.selectPage) {
+              throw new UserFacingError("command.unsupported", "当前卡片不支持翻页");
+            }
+            await this.openResponse(pending.target, pending.actorId,
+              pending.selectPage(Number(submittedInput)), pending.assertActive, undefined, pending.expiresAt);
+          } else if (resolvedCommand === "home") {
+            await this.open(pending.target, pending.actorId);
+          } else if (resolvedCommand === "help") {
             await this.openCard(
               pending.target,
               pending.actorId,
@@ -757,6 +780,7 @@ function renderFeishuCategorizedCommandsCard(
       ["Doctor", "feishu-doctor", "default"],
     ]),
     feishuCardPlainText("重命名和 Review 打开输入或选项；点击“切换 Plan 模式”会直接请求切换。发送 /help 返回命令中心。"),
+    actionRow(token, [["返回首页", "home", "default"]]),
   ]);
 }
 
