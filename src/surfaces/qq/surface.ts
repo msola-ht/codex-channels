@@ -45,8 +45,6 @@ export class QqSurface implements SurfaceAdapter {
     return this.current.messages.presentScheduledTaskConfirmation(target, actorId, preview);
   };
   readonly output: SurfaceOutputPort = {
-    observeUserMessageIdentity: identity => this.current?.messages.observeUserMessageIdentity(identity),
-    observeQueueChanged: (target, threadId) => this.current?.messages.observeQueueChanged(target, threadId),
     deliverySource: {
       capture: event => this.current?.messages.deliverySource.capture(event),
       await: (reference, signal) => this.current?.messages.deliverySource.await(reference, signal) ?? Promise.resolve(false),

@@ -69,7 +69,7 @@ function toThreadNameUpdatedStateEvent(value: unknown): ThreadStateEvent | undef
   return parsed ? { type: "thread.name.updated", ...parsed } : undefined;
 }
 
-/** Queue changes only invalidate the local selector snapshot; they never trigger a read. */
+/** Queue changes invalidate Revert confirmations; they never trigger a read. */
 export function toThreadQueueChangedEvent(
   notification: RpcNotification,
 ): { threadId: string } | undefined {

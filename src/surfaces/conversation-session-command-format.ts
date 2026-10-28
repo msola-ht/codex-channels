@@ -1,7 +1,5 @@
 import type {
   ConversationCommandResult,
-  ThreadQueueInputType,
-  ThreadQueueItem,
 } from "../application/index.js";
 
 import { toStructuredMarkdownList } from "./markdown-list.js";
@@ -60,32 +58,6 @@ export function formatConversationSessions(
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Session ID>"
       : "恢复：/resume <序号、名称或 Session ID>",
-  ].join("\n"));
-}
-
-export function formatConversationThreadQueue(
-  result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
-): string {
-  if (result.result.totalItemCount === 0) {
-    return toStructuredMarkdownList([
-      "App Server Queue 为空",
-      `第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalItemCount} 条`,
-      "新增：/queue add <文本>",
-    ].join("\n"));
-  }
-  if (result.result.page > result.result.pageCount) {
-    return toStructuredMarkdownList([
-      `App Server Queue（共 ${result.result.totalItemCount} 条）`,
-      `第 ${result.result.page} 页不存在，共 ${result.result.pageCount} 页`,
-      "返回第一页：/queue list 1",
-    ].join("\n"));
-  }
-  return toStructuredMarkdownList([
-    `App Server Queue（第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalItemCount} 条）：`,
-    ...result.result.items.map((item, index) =>
-      `${result.result.selectors[index] ?? "?"}. ${formatQueueItem(item)}`),
-    "",
-    "数字序号仅在最近五分钟的本会话列表快照内有效；也可使用完整 ID。",
   ].join("\n"));
 }
 
@@ -242,24 +214,6 @@ export function isTurnLifecycleAcknowledgedOutcome(
     || outcome.type === "plugin.started"
     || outcome.type === "agents.started"
   ) && !outcome.steered;
-}
-
-export function formatQueueItem(
-  item: ThreadQueueItem,
-): string {
-  const preview = item.textPreview ? ` · ${item.textPreview}` : "";
-  return `${item.id} · 类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}${preview}`;
-}
-
-export function formatThreadQueueInputTypeLabel(type: ThreadQueueInputType): string {
-  switch (type) {
-    case "text": return "纯文本";
-    case "image": return "图片";
-    case "audio": return "音频";
-    case "skill": return "Skill";
-    case "mention": return "Mention";
-    default: return "复合输入";
-  }
 }
 
 export function formatTakeoverSource(surface: string): string {

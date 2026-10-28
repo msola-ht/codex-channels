@@ -127,26 +127,15 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `autoreview.update-failed` | 当前会话审批方式更新请求未成功；请用 /autoreview 核对实际状态后再决定是否重试 | RPC 拒绝或更新请求失败，不自动重试 |
 | `autoreview.update-unconfirmed` | 尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态 | 未取得匹配的权威设置通知，或确认期间连接中断、Thread 失效、实际设置不可确认；不能推断已成功或未修改 |
 
-### 目标、队列与指标
+### 会话、队列保护与指标
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
-| `goal.empty` | 目标不能为空 | /goal set 未提供目标 |
-| `goal.usage` | /goal 用法提示 | 参数格式错误 |
 | `release.usage` | /release 用法提示 | 参数格式错误 |
 | `release.unsupported` | 当前环境不支持释放会话占用 | Gateway 未装配 Thread 占用释放能力 |
-| `queue.usage` | `/queue add|list|update|delete|reorder|start` 用法提示 | 参数格式错误 |
-| `queue.unavailable` | 当前 App Server 不提供持久队列 | Queue 未装配或状态库不可用 |
-| `queue.empty` | App Server Queue 为空 | 启动时没有可用条目 |
-| `queue.busy` | 当前 Thread 有活动或待触发 Turn，请稍后重试 | 启动条目时 App Server 忙 |
+| `queue.unavailable` | 当前 App Server 不提供持久队列 | 原生队列只读检查不可用 |
 | `queue.pending-overrides` | Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成 | Queue 与下一 Turn 设置同时待处理 |
-| `queue.full` | App Server Queue 已满，最多 100 条 | 原生 Queue 达到容量 |
-| `queue.snapshot.required` | 请先执行 `/queue list` 刷新数字选择快照 | 数字选择器快照过期 |
-| `queue.item-not-found` | 找不到指定 Queue 条目，请使用完整 ID 或刷新列表 | 条目不存在或列表已变化 |
-| `queue.item-not-editable` | 只有纯文本 Queue 条目可以更新 | 条目含非文本输入 |
-| `queue.position.invalid` | Queue 目标位置必须在当前队列范围内 | reorder 位置无效 |
-| `queue.reorder-conflict` | Queue 已发生变化，请刷新列表后重试排序 | 并发 reorder 失败 |
-| `queue.failed` | Queue 操作失败，请稍后重试 | 未分类的 Queue 错误 |
+| `queue.failed` | 无法核对原生队列状态，请稍后重试 | 原生队列读取失败 |
 | `scheduled-task.command.invalid` | `/schedule` 用法或参数提示 | 计划、页码、名称或文本格式无效 |
 | `scheduled-task.confirmation.invalid` | 确认令牌无效、过期或已使用 | 创建/删除确认失效或上下文改变 |
 | `scheduled-task.forbidden` | 当前用户无权管理该会话的计划任务 | Actor 未授权或身份缺失 |

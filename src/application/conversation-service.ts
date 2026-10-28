@@ -59,7 +59,6 @@ import {
   type ConversationInputEvent,
   type RateLimitSnapshot,
   type SurfaceId,
-  type ThreadGoal,
   type ThreadApprovalsReviewer,
   type ThreadTokenUsage,
   type TurnStartIdentity,
@@ -78,10 +77,7 @@ import type {
   ThreadApprovalsReviewerPort,
   TurnInput,
 } from "./turn-port.js";
-import type {
-  ThreadQueueItem,
-  ThreadQueuePort,
-} from "./thread-queue-port.js";
+import type { ThreadQueuePort } from "./thread-queue-port.js";
 import type {
   ThreadHistoryPort,
   ThreadRevertListResult,
@@ -92,18 +88,9 @@ import type {
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
 import { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
-import {
-  ThreadQueueService,
-  queueUserFacingError,
-  type ThreadQueueListResult,
-  type ThreadQueueReorderResult,
-} from "./thread-queue-service.js";
 import { ThreadRevertService } from "./thread-revert-service.js";
+import { hasNativeQueueItems } from "./thread-queue-reader.js";
 import type { SessionDisplayCachePort } from "../conversation-core/index.js";
-import {
-  LunaReserveService,
-  type LunaReserveServiceOptions,
-} from "./luna-reserve-service.js";
 import { ConversationAccountMetricsService } from "./conversation-account-metrics-service.js";
 import {
   ConversationExtensionQueryService,
@@ -120,14 +107,8 @@ import {
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
-import type { QueueSubmissionObservation, ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
-export type {
-  ThreadQueueListResult,
-  ThreadQueueReorderResult,
-} from "./thread-queue-service.js";
-
 export interface Submission {
   threadId: string;
   turnId: string;
@@ -219,7 +200,6 @@ export interface ConversationStatus {
   fastModePending: boolean;
   collaborationMode: "default" | "plan";
   collaborationModePending: boolean;
-  goal?: ThreadGoal;
   contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
@@ -254,9 +234,6 @@ export interface ConversationTurnUseCases {
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
   startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }>;
-  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
-  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
 }
 
 /** Stable model and installed-extension boundary. */
@@ -310,24 +287,8 @@ export interface ConversationExtensionUseCases {
   listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]>;
 }
 
-/** Stable native Queue and paginated Revert boundary. */
-export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem>;
-  queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
-  queueUpdate(
-    target: ConversationTarget,
-    selector: string,
-    value: string,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueItem>;
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }>;
-  queueReorder(
-    target: ConversationTarget,
-    selector: string,
-    position: number,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueReorderResult>;
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }>;
+/** Stable paginated Revert boundary. */
+export interface ConversationRevertUseCases {
   revertList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
@@ -396,19 +357,17 @@ export interface ConversationAccountMetricsUseCases {
 export class ConversationService implements
   ConversationTurnUseCases,
   ConversationSessionUseCases,
-  ConversationQueueRevertUseCases,
+  ConversationRevertUseCases,
   ConversationExtensionUseCases,
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly attachmentInputs = new Map<string, Set<AbortController>>();
   private readonly pendingSelections = new Set<{ threadId: string | undefined; invalidated: boolean }>();
   private readonly hookUseCases: ConversationHookService;
-  private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
   private readonly extensionQueries: ConversationExtensionQueryService;
   private readonly accountMetrics: ConversationAccountMetricsService;
-  private readonly lunaReserve: LunaReserveService | undefined;
-  private readonly pendingBackgroundReleases = new Map<string, boolean>();
+  private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, {
     promise: Promise<boolean>;
     retryRequested: boolean;
@@ -436,10 +395,6 @@ export class ConversationService implements
     threadHistory?: ThreadHistoryPort,
     private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
     sessionDisplayCache?: SessionDisplayCachePort,
-    lunaReserveOptions?: Omit<
-      LunaReserveServiceOptions,
-      "router" | "models" | "collaborationModes" | "activity" | "locks"
-    >,
     private readonly threadApprovalsReviewer?: ThreadApprovalsReviewerPort,
     hookAuthorization?: (target: ConversationTarget, actorId: string) => void,
     hookReviewPolicy?: HookReviewPolicy,
@@ -470,55 +425,12 @@ export class ConversationService implements
       providerAccounts,
       requestMetricsQuery,
     );
-    this.queueUseCases = new ThreadQueueService(
-      this.locks,
-      router,
-      models,
-      collaborationModes,
-      threadQueue,
-    );
     this.revertUseCases = new ThreadRevertService(
       this.locks,
       router,
       threadQueue,
       threadHistory,
     );
-    this.lunaReserve = lunaReserveOptions
-      ? new LunaReserveService({
-          ...lunaReserveOptions,
-          router,
-          models,
-          ...(collaborationModes ? { collaborationModes } : {}),
-          activity: {
-            hasActiveTurn: (threadId) => core.activeTurnForThread(threadId) !== undefined,
-          },
-          locks: this.locks,
-        })
-      : undefined;
-  }
-
-  markLunaReserveUsageLimit(threadId: string, turnId: string): void {
-    this.lunaReserve?.markUsageLimit(threadId, turnId);
-  }
-
-  recoverLunaReserveAfterTurn(threadId: string, turnId: string): void {
-    this.lunaReserve?.recoverAfterTurn(threadId, turnId);
-  }
-
-  clearLunaReserveThread(threadId: string): void {
-    this.lunaReserve?.clearThread(threadId);
-  }
-
-  observeLunaReserveSettings(threadId: string): void {
-    this.lunaReserve?.observeSettings(threadId);
-  }
-
-  clearLunaReserveAccountState(): void {
-    this.lunaReserve?.clearAccountState();
-  }
-
-  closeLunaReserve(): Promise<void> {
-    return this.lunaReserve?.close() ?? Promise.resolve();
   }
 
   releaseThread(
@@ -629,7 +541,6 @@ export class ConversationService implements
         return busy();
       }
       this.invalidateRevertSnapshot(target);
-      this.invalidateQueueSnapshot(current.threadId);
       this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return { status: "released", threadId: current.threadId };
     });
@@ -1034,40 +945,6 @@ export class ConversationService implements
     return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation, onThreadPrepared);
   }
 
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value, assertAuthorized, observation);
-  }
-
-  queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
-    return this.queueUseCases.list(target, page, assertAuthorized);
-  }
-
-  queueUpdate(
-    target: ConversationTarget,
-    selector: string,
-    value: string,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueItem> {
-    return this.queueUseCases.update(target, selector, value, assertAuthorized);
-  }
-
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }> {
-    return this.queueUseCases.delete(target, selector, assertAuthorized, onDeleted);
-  }
-
-  queueReorder(
-    target: ConversationTarget,
-    selector: string,
-    position: number,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueReorderResult> {
-    return this.queueUseCases.reorder(target, selector, position, assertAuthorized);
-  }
-
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }> {
-    return this.queueUseCases.start(target, selector, assertAuthorized, observation);
-  }
-
   revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
     return this.revertUseCases.list(target, page, assertAuthorized);
   }
@@ -1088,10 +965,6 @@ export class ConversationService implements
     assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
     return this.revertUseCases.confirm(target, token, actorId, assertAuthorized);
-  }
-
-  invalidateQueueSnapshot(threadId: string): void {
-    this.queueUseCases.invalidateSnapshot(threadId);
   }
 
   invalidateRevertSnapshot(threadId: string): void;
@@ -1267,7 +1140,7 @@ export class ConversationService implements
         }, assertAuthorized);
       this.invalidateRevertSnapshot(target);
       if (preserveCurrent && current) {
-        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.pendingBackgroundReleases.add(current.threadId);
         this.bindingLifecycle?.backgrounded(current.threadId);
       }
       if (selectedHasQueue) {
@@ -1306,7 +1179,7 @@ export class ConversationService implements
         restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
       } : undefined, assertAuthorized);
       if (preserveCurrent && current) {
-        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.pendingBackgroundReleases.add(current.threadId);
         this.bindingLifecycle?.backgrounded(current.threadId);
       }
       this.invalidateRevertSnapshot(target);
@@ -1728,42 +1601,6 @@ export class ConversationService implements
     return this.extensionQueries.listPermissionProfiles(target, assertAuthorized);
   }
 
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }> {
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      const goal = await this.codex.getGoal(binding.threadId, beforeSubmit);
-      return { threadId: binding.threadId, goal };
-    });
-  }
-
-  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal> {
-    const normalized = objective.trim();
-    if (!normalized) {
-      return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
-    }
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      const goal = await this.codex.setGoal(binding.threadId, normalized, beforeSubmit);
-      this.core.handle({
-        type: "thread.goal.updated",
-        threadId: binding.threadId,
-        goal,
-      });
-      return goal;
-    });
-  }
-
-  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      await this.codex.clearGoal(binding.threadId, beforeSubmit);
-      this.core.handle({
-        type: "thread.goal.cleared",
-        threadId: binding.threadId,
-      });
-    });
-  }
-
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
@@ -1771,7 +1608,6 @@ export class ConversationService implements
     const executionContext = binding ? this.router.executionContextForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
-    const goal = binding ? this.core.goal(binding.threadId) : undefined;
     const contextCompactionCount = binding
       ? this.core.contextCompactionCount(binding.threadId)
       : undefined;
@@ -1791,7 +1627,6 @@ export class ConversationService implements
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
-      ...(goal ? { goal } : {}),
       ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
       ...(weeklyLimit ? { weeklyLimit } : {}),
       workspaceId: workspace.id,
@@ -2037,20 +1872,25 @@ export class ConversationService implements
   }
 
   private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
-    await this.queueUseCases.rejectPendingOverrideChange(target, assertAuthorized);
+    assertAuthorized?.();
+    const threadId = this.router.current(target)?.threadId;
+    if (threadId && await this.probeNativeQueueItems(threadId, assertAuthorized)) {
+      throw new UserFacingError(
+        "queue.pending-overrides",
+        "原生队列尚有待处理输入，请先在原生客户端处理完成后再修改模型、思考、速度或 Plan 选择",
+      );
+    }
   }
 
   private async probeNativeQueueItems(threadId: string, assertAuthorized?: () => void): Promise<boolean> {
-    return this.queueUseCases.hasItems(threadId, assertAuthorized);
+    return hasNativeQueueItems(this.threadQueue, threadId, assertAuthorized);
   }
 
   async releaseBackgroundIfComplete(
     threadId: string,
-    options: { dispatchQueued?: boolean; isCurrent?: () => boolean } = {},
+    options: { isCurrent?: () => boolean } = {},
   ): Promise<boolean> {
-    // Retries must keep the latest completion's dispatch policy: interruption
-    // preserves Queue entries even when subagent settlement delays release.
-    this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
+    this.pendingBackgroundReleases.add(threadId);
     const current = this.backgroundReleaseAttempts.get(threadId);
     if (current) {
       current.retryRequested = true;
@@ -2099,16 +1939,7 @@ export class ConversationService implements
     if (this.hasPendingSubagentRuns?.(threadId)) {
       return false;
     }
-    if (this.pendingBackgroundReleases.get(threadId) !== false) {
-      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId, () => {
-        if (!canRelease()) throw new UserFacingError("command.authorization-changed", "后台会话状态已变化");
-      });
-      if (queueState !== "empty" && queueState !== "unavailable") {
-        return false;
-      }
-    } else if (await this.probeNativeQueueItems(threadId)) {
-      return false;
-    }
+    if (await this.probeNativeQueueItems(threadId)) return false;
     const target = this.router.targetForThread(threadId);
     if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
     await this.bindingLifecycle?.beforeBackgroundRelease?.(target, threadId);
@@ -2154,35 +1985,10 @@ export class ConversationService implements
    * the App Server notification reader itself.
    */
   retryPendingBackgroundRelease(threadId: string, isCurrent?: () => boolean): Promise<boolean> {
-    const dispatchQueued = this.pendingBackgroundReleases.get(threadId);
-    if (dispatchQueued === undefined) {
+    if (!this.pendingBackgroundReleases.has(threadId)) {
       return Promise.resolve(false);
     }
-    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued, ...(isCurrent ? { isCurrent } : {}) });
-  }
-
-  private async dispatchNativeQueueBeforeRelease(
-    threadId: string,
-    assertAuthorized: () => void,
-  ): Promise<"empty" | "started" | "busy" | "unavailable"> {
-    const queue = this.threadQueue;
-    if (!queue) return "unavailable";
-    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(threadId, assertAuthorized);
-    try {
-      // `thread/queue/start` takes the same per-Thread dispatch lock as the
-      // 0.148 idle contributor. It is used here as a completion barrier: an
-      // already queued item is either started or observed empty only after
-      // the native dispatcher has finished its own start/delete sequence.
-      await queue.startQueueItem(threadId, undefined, beforeSubmit);
-      return "started";
-    } catch (error) {
-      const mapped = queueUserFacingError(error, "start");
-      if (mapped.code === "queue.empty") return "empty";
-      if (mapped.code === "queue.unavailable") return "unavailable";
-      if (mapped.code === "queue.busy") return "busy";
-      if (mapped.code === "queue.item-not-found") return "busy";
-      throw mapped;
-    }
+    return this.releaseBackgroundIfComplete(threadId, { ...(isCurrent ? { isCurrent } : {}) });
   }
 
   private restoreSelectionsAfterBindingChange(
@@ -2199,7 +2005,6 @@ export class ConversationService implements
 
   private clearConversationState(target: ConversationTarget): void {
     this.clearPendingSelections(target);
-    this.queueUseCases.clearSnapshot(target);
     this.invalidateRevertSnapshot(target);
   }
 

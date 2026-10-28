@@ -14,12 +14,7 @@ export type {
   TerminateCodexProcess,
 } from "./codex-process.js";
 export {
-  toProtocolQueueText,
-  toThreadQueueAddResult,
-  toThreadQueueItem,
   toThreadQueuePage,
-  toThreadQueueStartResult,
-  toThreadQueueUpdateResult,
 } from "./queue-adapter.js";
 export {
   toThreadRevertResult,
@@ -71,4 +66,3 @@ export {
   type WindowsProxyTransportOptions,
 } from "./windows-proxy-transport.js";
 export { toReasoningGuardInput } from "./notification-reasoning-guard.js";
-export { toUserMessageIdentity } from "./user-message-identity.js";

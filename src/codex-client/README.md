@@ -10,10 +10,10 @@ Turn start/steer 另支持可选本地 `requestAttempted` 同步观察，在输�
 图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；受管 DS 还在私有上传路由
 IPC 前后及上传后复核。撤权后不再新出站，
 守卫错误保留原分类，既有上传失败处理不会将其吞掉或重试。
-Queue 的本地守卫由 JSON-RPC 在每次请求尝试前执行，读请求遇过载后的重试也复核授权；写请求仍不重试。
+原生 Queue 的只读安全查询在每次请求尝试前执行本地守卫，过载重试也复核授权。
 模型与 Thread 列表分页、模型默认配置读取/写入、派生、归档和取消订阅同样保留调用方的本地守卫，
 不把闭包编码进协议；已提交的默认配置写入不会因响应期间撤权自动回滚。
-Thread 命名、固定、压缩、Review 和 Goal 同样接受提交守卫；固定状态的初始读取、元数据写入及分区移动
+Thread 命名、固定、压缩和 Review 同样接受提交守卫；固定状态的初始读取、元数据写入及分区移动
 分别复核。移动已提交后的权威读回用于结算实际结果，不因随后撤权跳过，也不回滚已经提交的元数据。
 Skill/Plugin 目录解析和 MCP 列表、资源读取、OAuth、刷新保留调用方提交守卫；分页与过载重试逐次复核，
 MCP 刷新各 Provider 分支分别复核并等待已启动分支结算。取消信号与授权闭包是独立的本地参数。
@@ -26,12 +26,10 @@ Permission Profile 分页、无人值守权限预检和账户查询接受本地�
 Provider 路由层为所有转发通知附上实际连接的 Provider 路由键，覆盖上游同名字段；固定自定义主 Provider 的路由键仍为 `openai`，实际账户身份由组合根区分。
 聚合暂时关闭时，缺失 `codexc-aggregate` Client 返回专用不可用错误，保留旧绑定供后续恢复；不会回退主实例或把临时关闭分类为会话删除。
 
-Luna Reserve 设置写入也在 Provider 准备后执行最终提交守卫，并与当前 Thread 审批方式更新复用
-RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 失效、重连或关闭会清理等待。
-空 RPC 响应不等于设置已经应用，组合根须等待共享入站归约后由 Application 核对实际设置。
+当前 Thread 审批方式更新同时确认 RPC 成功和最新匹配设置通知；超时、断线、Thread 失效、重连或关闭会清理等待。
+空 RPC 响应不等于设置已经应用。
 
-0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
-Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结果不进入当前会话缓存。
+0.162.0 引入的 `partial_answer` 在通知边界继续保留。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
 遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。
@@ -75,23 +73,22 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   Thread，不从历史或元数据中的空 Turn 补证；旧 Turn 完成不能覆盖新活动，active、旁路错误、
   Thread 失效、重新订阅、取消订阅、断线及关闭会使相关证据失效，淘汰后也不以孤立 completed 重建。
   取消订阅发送及结算时均清理证据，取消订阅后的读取不能沿用旧终态证明新活动不存在。
-  Queue 启动屏障只有明确返回空队列、且等待期间没有通知或连接/提交变化时才恢复原证据；其他拒绝保持未知，不把失败写入当成已完成执行。
   查询共享调用方取消信号和 10 秒总预算，最多 20 页、
   2,000 个唯一节点及 64 层祖先；身份或 Provider 不匹配、缺字段、循环、越限、超时和断线均拒绝，
   不以持久 `thread/list` 或内存活动缓存替代权威查询。覆盖范围遵循官方 loaded/list，包含标准
   SubAgent 与 ephemeral，但不宣称枚举上游主动隐藏的 Internal Thread。
 - `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理；OpenAI ChatGPT 查询无凭据只读路由，走官方账户路由、令牌校验、创建、无凭据字节 PUT 和完成确认。受管 DS 按 Thread 的精确 Provider 经 Bootstrap 注入的私有 IPC reader 取得随机 Bearer 能力；modelEndpoint 包含准确账户前缀，必须与该 App Server 配置精确一致，能力只发送到私有合同确认的同源根路径上传 endpoint。上传前后复核能力和修订，只提交校验后的 fileId，能力缺失或变化失败关闭，不回退 inline。OpenAI API Key、自定义第三方、CLP 等其他 Provider 保持 inline。管理有界并发、顺序多图、分阶段超时和取消；OpenAI 同一字节 PUT 共用 5 分钟、最多 5 次尝试及退避，完成确认最多 30 秒；DS 客户端传输上限 5 分钟，代理整体和上游 Files POST 仍受各自更短期限约束，材料及路由准备阶段最多 60 秒。创建、DS 上传和 Turn 提交不重试；账户或 Provider 修订变化时取消。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
-  Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
-- `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
-  本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。仅在六个 Queue RPC 拒绝处将锁定版本的错误码与已知文字映射为稳定失败分类；传输及响应转换失败原样传播。
+  Turn 与 Review 响应；缺少稳定结果必需字段时失败关闭。
+- `queue-adapter.ts`：只为 Revert、绑定释放及模型覆盖安全查询原生 Queue，返回条目数量、分页游标及有序内容的不可逆指纹，
+  不传播输入正文或条目标识；仅将只读 RPC 的已知不可用拒绝映射为稳定分类，传输及响应转换失败原样传播。
 - `history-adapter.ts`：把官方分页 Turn 与 Revert 响应裁剪为有界摘要和稳定 Thread 快照；只提取
   `userMessage` 的安全输入摘要，拒绝残缺游标、非空 Revert 历史和越界字段。
-- `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，
+- `user-input-summary.ts`：为分页历史提供 Client 内部 UserInput 安全摘要；摘要有界，
   不传播完整输入、命令参数或本地路径。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
-  只有 Luna Reserve 内部窄入口会请求隐藏目录并精确解析 `gpt-reserve`，公开模型列表仍过滤隐藏项；
+  只请求可见模型目录并过滤隐藏项；
   官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
 - `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
@@ -102,8 +99,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `parseAggregateModelOptions` 复用纯目录裁剪并显式校验聚合命名空间，不读取源文件或启动服务。
   聚合保留源模型的不透明 ID 和无思考等级语义，按 API 可用性与 picker 可见性筛选，保持空闲目录与 `model/list` 一致。
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
-  启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
-  有界 Luna Reserve 授权摘要映射为 Application
+  启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间和账户 ID 映射为 Application
   稳定摘要；接受当前 0.163.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
   `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
@@ -137,13 +133,12 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `notification-adapter.ts`：稳定导出门面，只 re-export 四个协议入口与 `AutoApprovalReviewEvent` 类型；具体映射按目标消费者拆分到下列文件，其它模块仍从本路径导入。
 - `notification-conversation-events.ts`：把官方 Notification 转换为 Conversation Core 拥有的稳定事件；异步 Agent 消息保留 `delivery` 与已校验的问题，按过程消息处理其阶段；
   `hook/completed` 保留 Thread、运行 ID、已知触发事件及上游终态，不按执行模式额外过滤；忽略 `hook/started`，不转发输出条目、状态自由文本或路径；
-  校验 Turn、Item、Diff、Plan、Goal 与 Token 字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
-  只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn 错误在此统一脱敏并限长，
+  校验 Turn、Item、Diff、Plan 与 Token 字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
+  只识别 `misalignmentPolicyViolation`、额度耗尽的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
 - `notification-reasoning-guard.ts`：将锁定协议的 `item/reasoning/textDelta` 与 `summaryTextDelta` 投影为 Application 重复保护的瞬时输入，保留 Thread／Turn／Item／段索引及原始思考／摘要来源隔离；Item 起止只标记边界，不把完成快照重放为增量。内容不转为渠道事件或指标。
 - `notification-account-events.ts`：映射账户、额度、MCP OAuth 完成、MCP 启动状态与 warning 事件，统一脱敏并限长，残缺字段省略而不推断。
-- `notification-thread-state.ts`：映射 Routing 侧线程设置、线程名、生命周期与 Queue 变更事件；Queue 变化只让本地选择快照失效，不触发读取。
-- `user-message-identity.ts`：仅从官方 item/started.userMessage 投影 Thread、Turn、Item 和 client ID，包含纯媒体输入但不读取正文；供本代次 Queue 来源关联使用。JsonRpc 本地 isCurrentConnection 闭包证明原连接仍完成握手且当前有效，不编码到协议或持久记录。
+- `notification-thread-state.ts`：映射 Routing 侧线程设置、线程名、生命周期与 Queue 变更事件；Queue 变化只让 Revert 确认失效，不触发读取。
 - `notification-review.ts`：把受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。
 - `notification-parse-helpers.ts`：上述映射共用的纯解析与基础断言（记录/字符串断言、Turn 与 Thread 状态、MessagePhase、PlanType、额度快照、Token 用量与 Turn 错误分类）；不持有状态、不执行 IO。
 - `value-primitives.ts`：本模块适配器共用的最小取值断言（有限数值、原样字符串、去空白后非空的字符串）；不含协议语义、不持有状态，供通知映射、操作摘要与服务器请求解码复用同一实现。
@@ -171,7 +166,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill。
+- `client.ts`：Thread 搜索/归档/固定、原生 Queue 只读安全查询、分页历史与 Revert、Turn、模型、权限、Skill。
   inline Review 的可选 requestAttempted 与普通 Turn 提交一样要求同步返回，观察后再次核对最终守卫；响应必须关联请求 Thread 和非空 Turn，未知结果不重试。
   新建 Thread 隐式使用 Gateway 默认模型前核对当前实例 `model/list`，失效时不发送 `thread/start`；显式模型和历史恢复保持各自调用合同。
   仅在 `thread/resume` 拒绝处，将 `-32600` 且完整消息精确等于 `no rollout found for thread id <请求的 Thread ID>` 的错误映射为稳定 `thread.resume.history-unavailable`；其他方法、错误码或 Thread 身份不复用该分类。此错误不证明 Thread 已删除，Client 不自动命名、创建替代 Thread 或重试写请求，保留绑定与恢复调度由 Router 和组合根负责。
@@ -210,7 +205,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   与原生 CLI 一致发送稳定 `threadSource=user`，计划任务新建保留 `threadSource=automation`。
   Fork 不继承父会话的功能来源；恢复接口没有来源覆盖字段，保留官方持久来源，不重写旧会话或历史用量。
   普通会话入口的 `turn/start` 显式发送 `turnTrigger=user`；计划任务不填该字段，
-  `turn/steer` 与 Queue 使用各自原生协议，不附加不支持的字段。
+  `turn/steer` 使用原生协议，不附加不支持的字段。
   新建、恢复和 Fork 的 `runtimeWorkspaceRoots` 校验后透传为生命周期目录快照；设置通知只提供 cwd，不能更新该 roots 快照。
   新建、恢复和 Fork 的 `instructionSources` 透传为实际加载文件清单，供 `/status` 展示生命周期快照；
   不读取文件正文，也不据此推断系统、开发者或其他动态指令是否存在。
@@ -223,13 +218,11 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
   重置券读取保留受控可用券的 ID、到期时间及展示说明；消费使用显式券 ID 和幂等键，禁止过载自动重试。
-  OpenAI 额度读取声明 Luna Reserve 客户端能力，后台恢复轮询省略独立重置券详情；自动切换只解析
-  精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
-  不写用户级默认设置。
+  OpenAI 额度读取不声明自动回退能力；后台只读查询省略独立重置券详情。
 - `provider-routing-client.ts` 不暴露自定义 Thread 分区 RPC；固定状态仍通过官方 Pinned 分区移动实现。
   `listModelsForProvider` 通过指定实例和既有活动边界读取模型目录，供独立 CP 选择及精确可用性检查共用；不回退主实例目录。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
-  生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
+  生命周期、Turn、Review 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   Server Request 的物理来源与已知 Thread Provider 冲突时拒绝；未知来源关联只作为读取路由提示，
   后续官方 Thread 快照必须匹配所读实例及请求的 Thread ID，才可用于子代理审批归属。
   `readConnectedThreadState` 只在现有连接的活动保护内读取官方无历史 Thread 元数据；未知归属先由已连接主实例定位，
@@ -253,11 +246,10 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   模型目录与 Profile 有效设置由对应 App Server 启动配置持有；跨 Provider 模型选择的默认思考等级
   和服务层级读取精确路由到目标实例。
 
-Queue 的六个请求也按 Thread Provider 路由；只有 `thread/queue/list` 使用有界只读过载重试，
-其余五个写请求不自动重试。
+`thread/queue/list` 按 Thread Provider 路由并使用有界只读过载重试；没有 Queue 写入或启动端口。
 `thread/turns/list` 是有界只读查询，可按协议安全重试；`thread/revert` 是破坏性写请求，禁止自动重试。
 两者及 Revert 前置 `thread/read` 保留本地提交守卫；Provider 查询与准备后仍复核，读请求每次过载重试前复核。
-Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，Application 不使用截断预览自行重算。
+Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，Application 只接收数量和指纹。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

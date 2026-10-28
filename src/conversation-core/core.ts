@@ -6,7 +6,6 @@ import {
   type MessagePhase,
   type OutputEvent,
   type RateLimitSnapshot,
-  type ThreadGoal,
   type ThreadTokenUsage,
   type TurnErrorCode,
   type TurnStartIdentity,
@@ -52,7 +51,6 @@ export class ConversationCore {
   private readonly errorsByTurn = new Map<string, { message: string; errorCode?: TurnErrorCode }>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
-  private readonly goalsByThread = new Map<string, ThreadGoal>();
   private readonly contextCompactionItemIdsByThread = new Map<string, Set<string>>();
   private readonly seenUserMessages = new Set<string>();
   private readonly turnsWithUserMessage = new Set<string>();
@@ -183,10 +181,6 @@ export class ConversationCore {
     return this.usageByThread.get(threadId);
   }
 
-  goal(threadId: string): ThreadGoal | undefined {
-    return this.goalsByThread.get(threadId);
-  }
-
   private rememberContextCompactions(threadId: string, itemIds: readonly string[]): void {
     const known = this.contextCompactionItemIdsByThread.get(threadId) ?? new Set<string>();
     for (const itemId of itemIds) {
@@ -244,7 +238,6 @@ export class ConversationCore {
       for (const threadId of affectedThreadIds) {
         this.usageByThread.delete(threadId);
         this.usageTurnByThread.delete(threadId);
-        this.goalsByThread.delete(threadId);
         this.contextCompactionItemIdsByThread.delete(threadId);
         this.artifactsByThread.delete(threadId);
         this.timingByThread.delete(threadId);
@@ -258,7 +251,6 @@ export class ConversationCore {
     this.errorsByTurn.clear();
     this.usageByThread.clear();
     this.usageTurnByThread.clear();
-    this.goalsByThread.clear();
     this.contextCompactionItemIdsByThread.clear();
     this.seenUserMessages.clear();
     this.turnsWithUserMessage.clear();
@@ -314,19 +306,12 @@ export class ConversationCore {
         this.usageByThread.set(event.threadId, event.tokenUsage);
         this.usageTurnByThread.set(event.threadId, event.turnId);
         return;
-      case "thread.goal.updated":
-        this.goalsByThread.set(event.threadId, event.goal);
-        return;
-      case "thread.goal.cleared":
-        this.goalsByThread.delete(event.threadId);
-        return;
       case "thread.reverted":
         // Revert changes durable history, not local files. Drop only derived
         // displays; an active turn is left in activeByThread so the official
         // interrupted turn/completed event can close it normally.
         this.usageByThread.delete(event.threadId);
         this.usageTurnByThread.delete(event.threadId);
-        this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
         this.artifactsByThread.delete(event.threadId);
         this.timingByThread.delete(event.threadId);
@@ -536,7 +521,6 @@ export class ConversationCore {
         const weeklyLimit = usesOpenAiAccount(modelSettings?.modelProvider)
           ? this.weeklyRateLimit()
           : undefined;
-        const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
         const timing = accumulator?.output(
           event.turnId,
@@ -576,7 +560,6 @@ export class ConversationCore {
               }
             : {}),
           ...(weeklyLimit ? { weeklyLimit } : {}),
-          ...(goal ? { goal } : {}),
           ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
           ...(workspace
             ? { workspaceId: workspace.id, workspaceName: workspace.name }
@@ -604,7 +587,6 @@ export class ConversationCore {
       case "thread.deleted": {
         this.usageByThread.delete(event.threadId);
         this.usageTurnByThread.delete(event.threadId);
-        this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
         this.timingByThread.delete(event.threadId);
         this.clearTurnResponseState(event.threadId);

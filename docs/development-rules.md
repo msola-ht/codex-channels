@@ -150,8 +150,8 @@ Establish the shared business contract before implementing an entry point. CLI-f
 - Background tasks need a clear owner, cancellation path, bounded retries and a shutdown wait limit.
 - Register stop handling before the first potentially blocking resource acquisition. Stop during construction, startup or reload must prevent later readiness publication and new work. Internal fatal failures enter the same idempotent close path as external stop; withdraw readiness, close owned listeners/IPC and attempt remaining cleanup even if one resource fails, within the overall shutdown budget.
 - Keep Worker initialization, ordinary request and shutdown budgets distinct. Platform initialization costs may justify a bounded initialization allowance, not a blanket increase to every request or cleanup timeout.
-- Additional input for the next Turn uses the current Thread's App Server Queue. Gateway must not store a second message-body queue.
-  Add, list, update, delete, reorder and start through the controlled Queue port; explain App Server persistence semantics when enqueueing.
+- Gateway does not expose or write the Thread Queue. Retain bounded, read-only native Queue checks for Revert confirmation,
+  model-selection and binding safety; App Server owns existing queue data and dispatch. Never store a second message-body queue.
 - Bind approval state to Thread, the protocol-provided Turn and request identifier. MCP elicitation may use `turnId: null` when no active Turn can be associated,
   but must retain Thread and App Server request ID. Interaction tokens must be unpredictable, single-use and expiring.
 - Promptly invalidate interactions for requests already resolved by another client.

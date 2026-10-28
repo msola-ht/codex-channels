@@ -13,7 +13,6 @@ import {
 } from "../conversation-scheduled-task-command-format.js";
 import {
   formatSessionListCommand,
-  formatThreadQueueInputTypeLabel,
 } from "../conversation-session-command-format.js";
 import {
   formatConversationPermissions,
@@ -34,155 +33,6 @@ import { createWorkspaceSelectionPresentation } from "../workspace-selection-pre
 import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 import { createSessionListPresentation } from "../session-list-presentation.js";
 
-const feishuQueueChoiceChunkSize = 13;
-
-export function renderQueueCommandCenterChoices(
-  result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
-  chunk: number,
-): FeishuCommandCenterChoices {
-  const items = result.result.items;
-  const chunkCount = Math.max(1, Math.ceil(items.length / feishuQueueChoiceChunkSize));
-  if (!Number.isSafeInteger(chunk) || chunk < 0 || chunk >= chunkCount) {
-    throw new UserFacingError(
-      "queue.item-not-found",
-      "Queue 列表按钮已失效，请刷新 Queue 列表",
-    );
-  }
-  const start = chunk * feishuQueueChoiceChunkSize;
-  const visibleItems = items.slice(start, start + feishuQueueChoiceChunkSize);
-  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item, index) => ({
-    label: choiceButtonLabel(`${result.result.selectors[start + index] ?? "?"} · ${queueChoiceLabel(item)}`),
-    action: "queue",
-    input: `item ${result.result.page} ${chunk + 1} ${item.id}`,
-  }));
-  if (chunk > 0) {
-    choices.push({
-      label: "上一组",
-      action: "queue",
-      input: `list ${result.result.page} chunk ${chunk}`,
-    });
-  }
-  if (chunk + 1 < chunkCount) {
-    choices.push({
-      label: "下一组",
-      action: "queue",
-      input: `list ${result.result.page} chunk ${chunk + 2}`,
-    });
-  }
-  choices.push({
-    label: "刷新",
-    action: "queue",
-    input: `list ${result.result.page} chunk ${chunk + 1}`,
-  });
-  choices.push({
-    label: "新增文本",
-    action: "queue",
-    input: "add",
-  });
-  if (result.result.page > 1) {
-    choices.push({
-      label: "上一页",
-      action: "queue",
-      input: `list ${result.result.page - 1}`,
-    });
-  }
-  if (result.result.page < result.result.pageCount) {
-    choices.push({
-      label: "下一页",
-      action: "queue",
-      input: `list ${result.result.page + 1}`,
-    });
-  }
-  const firstVisible = visibleItems.length > 0 ? start + 1 : 0;
-  const lastVisible = visibleItems.length > 0 ? start + visibleItems.length : 0;
-  return {
-    title: `App Server Queue · 第 ${result.result.page}/${result.result.pageCount} 页`,
-    description: [
-      `共 ${result.result.totalItemCount} 条${visibleItems.length > 0 ? ` · 本页第 ${firstVisible}-${lastVisible}/${items.length} 条` : ""}`,
-      "",
-      ...(result.result.totalItemCount === 0
-        ? ["Queue 为空；可新增纯文本条目。", ""]
-        : result.result.page > result.result.pageCount
-        ? ["当前页面已不存在，请使用 /queue list 1 重新查看。", ""]
-        : visibleItems.flatMap((item, index) => [
-            `**${result.result.selectors[start + index] ?? "?"}. ${formatThreadQueueInputTypeLabel(item.inputType)}** · ${item.editable ? "可更新" : "只读摘要"}`,
-            "",
-            `安全预览：${choiceCardLiteral(item.textPreview ?? "", 120) || "（无文本预览）"}`,
-            "",
-          ])),
-      ...(visibleItems.length > 0 ? ["点击条目查看详情；启动和删除在详情中操作。", ""] : []),
-      "更新与排序请使用 /queue update|reorder 文本命令。预览过长时会截断。",
-    ].join("\n"),
-    descriptionFormat: "lark_md",
-    choices,
-  };
-}
-
-export function renderQueueItemChoices(
-  page: number,
-  chunk: number,
-  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
-): FeishuCommandCenterChoices {
-  return {
-    title: "Queue 条目",
-    description: [
-      `ID：${item.id}`,
-      `类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}`,
-      `安全预览：${item.textPreview || "（无文本预览）"}`,
-    ].join("\n"),
-    choices: [
-      {
-        label: "启动",
-        action: "queue",
-        input: `start ${item.id}`,
-      },
-      {
-        label: "删除",
-        action: "queue",
-        input: `delete-confirm ${page} ${chunk + 1} ${item.id}`,
-      },
-      {
-        label: "返回列表",
-        action: "queue",
-        input: `list ${page} chunk ${chunk + 1}`,
-      },
-    ],
-  };
-}
-
-export function renderQueueDeleteConfirmationChoices(
-  page: number,
-  chunk: number,
-  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
-): FeishuCommandCenterChoices {
-  return {
-    title: "确认删除 Queue 条目",
-    description: [
-      `ID：${item.id}`,
-      `安全预览：${item.textPreview || "（无文本预览）"}`,
-      "删除后无法通过 Gateway 恢复。",
-    ].join("\n"),
-    choices: [
-      {
-        label: "确认删除",
-        action: "queue",
-        input: `delete ${item.id}`,
-      },
-      {
-        label: "取消",
-        action: "queue",
-        input: `item ${page} ${chunk + 1} ${item.id}`,
-      },
-    ],
-  };
-}
-
-function queueChoiceLabel(
-  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
-): string {
-  return formatModelSettingLiteral(item.textPreview ?? "")
-    || `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
-}
 
 export function renderCommandCenterInitialChoices(
   action: FeishuCommandCenterAction,
@@ -196,16 +46,6 @@ export function renderCommandCenterInitialChoices(
         { label: "对比分支", action: "review-branch", input: "" },
         { label: "指定提交", action: "review-commit", input: "" },
         { label: "自定义说明", action: "review-custom", input: "" },
-      ],
-    };
-  }
-  if (action === "goal") {
-    return {
-      title: "Session Goal",
-      choices: [
-        { label: "查看当前", action, input: " " },
-        { label: "设置 Goal", action: "goal-set", input: "" },
-        { label: "清除 Goal", action, input: "clear" },
       ],
     };
   }
@@ -306,18 +146,6 @@ export function renderCommandCenterForm(
       placeholder: "例如：飞书私聊收口",
     };
   }
-  if (action === "queue") {
-    return {
-      kind: "form",
-      title: "写入 App Server Queue",
-      description: "纯文本会由 App Server 持久保存，默认容量为 100 条。",
-      action,
-      fieldLabel: "Queue 文本",
-      placeholder: "请输入要排队的纯文本",
-      inputPrefix: "add ",
-      multiline: true,
-    };
-  }
   if (action === "review-branch") {
     return {
       kind: "form",
@@ -346,17 +174,6 @@ export function renderCommandCenterForm(
       fieldLabel: "Review 说明",
       placeholder: "请输入审查范围和要求",
       inputPrefix: "custom ",
-      multiline: true,
-    };
-  }
-  if (action === "goal-set") {
-    return {
-      kind: "form",
-      title: "设置 Session Goal",
-      action: "goal",
-      fieldLabel: "目标",
-      placeholder: "请输入当前 Session 的目标",
-      inputPrefix: "set ",
       multiline: true,
     };
   }

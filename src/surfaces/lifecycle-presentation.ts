@@ -1,10 +1,6 @@
-import {
-  lunaReserveModel,
-  type ConversationStatus,
-} from "../application/index.js";
+import type { ConversationStatus } from "../application/index.js";
 import type {
   OutputEvent,
-  ThreadGoal,
   ThreadApprovalsReviewer,
   TurnErrorCode,
   TurnStartIdentity,
@@ -419,15 +415,11 @@ function formatTurnErrorMessage(
   value: string,
   errorCode?: TurnErrorCode,
   modelProvider?: string,
-  model?: string,
 ): string {
   if (errorCode === "misalignmentPolicyViolation") {
     return "请求因安全策略不一致而终止，请调整请求内容或目标后重试。";
   }
   if (errorCode === "usageLimitExceeded" && usesOpenAiAccount(modelProvider)) {
-    if (model === lunaReserveModel) {
-      return "Luna Reserve 用量已用尽。";
-    }
     return "OpenAI 普通用量已用尽。";
   }
   if (errorCode === "unauthorized") {
@@ -502,7 +494,7 @@ export function createTurnCompletedPresentation(
           }] : []),
         ]),
         ...(event.background ? [{ label: "任务", value: literal(event.threadId), literal: true }] : []),
-        ...(event.error ? [{ label: "错误", value: literal(formatTurnErrorMessage(event.error, event.errorCode, event.modelProvider, event.model)), literal: true }] : []),
+        ...(event.error ? [{ label: "错误", value: literal(formatTurnErrorMessage(event.error, event.errorCode, event.modelProvider)), literal: true }] : []),
         ...(!event.error && event.errorCode ? [{ label: "错误码", value: event.errorCode, literal: true }] : []),
         ...(event.missingFinalResponse ? [{ label: "结果", value: missingFinalResponseText }] : []),
         ...((event.runningSubagentCount ?? 0) > 0 ? [{ label: "后台子代理", value: `${event.runningSubagentCount} 个尚未结束` }] : []),
@@ -518,7 +510,6 @@ export function createTurnCompletedPresentation(
         event.error,
         event.errorCode,
         event.modelProvider,
-        event.model,
       )),
       literal: true,
     });
@@ -546,12 +537,6 @@ export function createTurnCompletedPresentation(
   runFields.push({ label: "上下文", value: usage && (capacity == null || capacity <= 0)
     ? `${contextUsage}（窗口上限未知）` : contextUsage });
   if ((event.contextCompactionCount ?? 0) > 0) runFields.push({ label: "上下文压缩", value: `${event.contextCompactionCount} 次` });
-  if (event.goal) {
-    runFields.push({
-      label: "Goal",
-      value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
-    });
-  }
   if (event.timing?.modelRequestCount !== undefined) {
     const recoveredFailureCount = event.status === "completed"
       && (event.timing.completedModelRequestCount ?? 0) > 0
@@ -845,24 +830,6 @@ function pendingSuffix(pending: boolean): string {
 
 function platformLabel(platform: NodeJS.Platform): string {
   return ({ darwin: "macOS", linux: "Linux", win32: "Windows" } as Partial<Record<NodeJS.Platform, string>>)[platform] ?? platform;
-}
-
-function goalStatusLabel(status: ThreadGoal["status"]): string {
-  const labels = {
-    active: "进行中",
-    paused: "已暂停",
-    blocked: "已阻塞",
-    usageLimited: "用量受限",
-    budgetLimited: "预算已用尽",
-    complete: "已完成",
-  } as const;
-  return labels[status];
-}
-
-function formatGoalTokens(goal: ThreadGoal): string {
-  return goal.tokenBudget === null
-    ? formatTokenCount(goal.tokensUsed)
-    : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
 }
 
 function turnStatusLabel(

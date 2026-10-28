@@ -23,7 +23,6 @@ import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
-import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqLiteralMarkdown } from "./message-markdown.js";
 import { qqMenuButton, qqChoiceLayout as choiceLayout, renderQqCommandMenu, renderQqStaticCommandMenu, type QqMenuButton } from "./command-menu.js";
@@ -47,7 +46,6 @@ interface Options {
   scope(target: ConversationTarget): string;
   workspaceScope(target: ConversationTarget): string;
   selectionScope(target: ConversationTarget): string | undefined;
-  readyThread(target: ConversationTarget): string | undefined;
   queryScope(target: ConversationTarget): string;
   allowed(target: ConversationTarget, actorId: string): boolean;
   beforeMutation(target: ConversationTarget, preserveRevert?: boolean): void;
@@ -61,7 +59,6 @@ type MenuAction =
   | { kind: "model"; selection: ModelSelectionRequest }
   | { kind: "resume" | "unarchive"; id: string }
   | { kind: "auto-review"; threadId: string; enabled: boolean }
-  | { kind: "goal-clear"; threadId: string }
   | { kind: "extension-query"; choice: QqExtensionChoice }
   | { kind: "hook"; input: string }
   | { kind: "hook-confirm"; token: string }
@@ -72,13 +69,6 @@ type MenuAction =
 type RevertAction = { kind: "revert-page"; page: number }
   | { kind: "revert-preview"; id: string }
   | { kind: "revert-confirm"; token: string };
-type QueueAction = { kind: "queue-page"; page: number }
-  | { kind: "queue-item" | "queue-delete-preview"; id: string }
-  | { kind: "queue-positions"; id: string; page: number }
-  | { kind: "queue-write"; operation: "start" | "delete"; id: string }
-  | { kind: "queue-write"; operation: "reorder"; id: string; position: number };
-type QueueExecutor = (input: string, guard: () => void) => Promise<ConversationCommandResult>;
-
 interface MenuContext {
   target: ConversationTarget;
   actorId: string;
@@ -90,16 +80,12 @@ interface MenuContext {
   queryScope?: string;
   revertSignal?: AbortSignal;
   hookSignal?: AbortSignal;
-  queueSignal?: AbortSignal;
-  queueThreadId?: string;
 }
 
-interface Selection extends MenuContext { action: MenuAction | RevertAction | QueueAction; ready: boolean }
+interface Selection extends MenuContext { action: MenuAction | RevertAction; ready: boolean }
 type Workspaces = Extract<ConversationCommandResult, { kind: "workspaces" }>;
 type Models = Extract<ConversationCommandResult, { kind: "models" }>;
 type Sessions = Extract<ConversationCommandResult, { kind: "sessions" }>;
-type ThreadQueue = Extract<ConversationCommandResult, { kind: "thread-queue" }>;
-type QueueItem = ThreadQueue["result"]["items"][number];
 const MAX_SELECTIONS = 4096;
 const MENU_LIFETIME_MS = 600_000;
 
@@ -108,7 +94,6 @@ export class QqCommandMenuController {
   private readonly selections = new Map<string, Selection>();
   private readonly revertScopes = new Map<string, AbortController>();
   private readonly hookScopes = new Map<string, AbortController>();
-  private readonly queueScopes = new Map<string, AbortController>();
   private generation = 0;
 
   constructor(private readonly options: Options) {}
@@ -129,19 +114,16 @@ export class QqCommandMenuController {
     this.revertScopes.clear();
     for (const controller of this.hookScopes.values()) controller.abort();
     this.hookScopes.clear();
-    for (const controller of this.queueScopes.values()) controller.abort();
-    this.queueScopes.clear();
     this.generation += 1;
   }
 
-  async open(target: ConversationTarget, actorId: string, argumentsText: string, executeQueue?: QueueExecutor): Promise<QqMenuPanel> {
+  async open(target: ConversationTarget, actorId: string, argumentsText: string): Promise<QqMenuPanel> {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     const staticMenu = renderQqStaticCommandMenu(input);
     if (staticMenu) return this.panel(context, staticMenu);
     const pick = /^pick ([a-f0-9]{24})$/u.exec(input);
-    if (pick) return this.pick(context, pick[1]!, executeQueue);
-    if (input === "queue") return this.queuePage(this.queueContext(context), 1);
+    if (pick) return this.pick(context, pick[1]!);
     const workspace = /^workspace(?: ([1-9][0-9]{0,4}))?$/u.exec(input);
     if (workspace) return this.workspacePage(context, pageNumber(workspace[1]));
     const model = /^model(?: ([1-9][0-9]{0,4}))?$/u.exec(input);
@@ -179,15 +161,13 @@ export class QqCommandMenuController {
     }
     const extension = renderQqExtensionCommand(result);
     if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);
-    if (result.kind === "thread-queue") return this.queueList(this.queueContext(this.context(target, actorId)), result, (result.result.page - 1) * 3 + 1);
-    if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions" && result.kind !== "auto-review" && result.kind !== "goal") return undefined;
+    if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions" && result.kind !== "auto-review") return undefined;
     const context = this.context(target, actorId);
     switch (result.kind) {
       case "workspaces": return this.workspaces(context, result, 1);
       case "models": return this.models(context, result, 1, result.view);
       case "sessions": return this.sessions(context, result, result.page);
       case "auto-review": return this.autoReview(context, result);
-      case "goal": return this.goal(context, result);
     }
   }
 
@@ -208,13 +188,12 @@ export class QqCommandMenuController {
   }
 
   private active(context: MenuContext): boolean {
-    return !this.options.signal.aborted && !context.revertSignal?.aborted && !context.hookSignal?.aborted && !context.queueSignal?.aborted && context.generation === this.generation
+    return !this.options.signal.aborted && !context.revertSignal?.aborted && !context.hookSignal?.aborted && context.generation === this.generation
       && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId);
   }
 
   private current(context: MenuContext, workspaceOnly = false): boolean {
     return this.active(context)
-      && (context.queueThreadId === undefined || this.options.readyThread(context.target) === context.queueThreadId)
       && (context.queryScope === undefined || this.options.queryScope(context.target) === context.queryScope)
       && (workspaceOnly ? this.options.workspaceScope(context.target) === context.workspaceScope
         : this.options.scope(context.target) === context.scope
@@ -230,15 +209,15 @@ export class QqCommandMenuController {
     return { ...value, isCurrent: () => this.current(context) };
   }
 
-  private button(context: MenuContext, label: string, action: MenuAction | RevertAction | QueueAction, labelLimit = QQ_BUTTON_LABEL_CHARACTERS): QqMenuButton {
+  private button(context: MenuContext, label: string, action: MenuAction | RevertAction, labelLimit = QQ_BUTTON_LABEL_CHARACTERS): QqMenuButton {
     this.assertCurrent(context);
     while (this.selections.size >= MAX_SELECTIONS) this.selections.delete(this.selections.keys().next().value!);
     const token = randomBytes(12).toString("hex");
-    this.selections.set(token, { ...context, action, ready: !["revert-confirm", "hook-confirm", "auto-review", "goal-clear", "queue-write"].includes(action.kind) });
+    this.selections.set(token, { ...context, action, ready: !["revert-confirm", "hook-confirm", "auto-review"].includes(action.kind) });
     return qqMenuButton(token, bounded(label, labelLimit), `/help pick ${token}`);
   }
 
-  private async pick(request: MenuContext, token: string, executeQueue?: QueueExecutor): Promise<QqMenuPanel> {
+  private async pick(request: MenuContext, token: string): Promise<QqMenuPanel> {
     const selection = this.selections.get(token);
     if (!selection || selection.actorId !== request.actorId
       || conversationTargetKey(selection.target) !== conversationTargetKey(request.target)) throw expired();
@@ -253,24 +232,6 @@ export class QqCommandMenuController {
         const panel = await this.fromResult(selection.target, selection.actorId, result);
         if (!panel) throw unsupported();
         return panel;
-      }
-      case "queue-page": return this.queuePage(selection, action.page);
-      case "queue-item": return this.queueItem(selection, action.id);
-      case "queue-delete-preview": return this.queueItem(selection, action.id, true);
-      case "queue-positions": return this.queuePositions(selection, action.id, action.page);
-      case "queue-write": {
-        if (!executeQueue) throw expired();
-        const guard = () => this.assertCurrent(selection);
-        guard();
-        const input = `${action.operation} ${action.id}${action.operation === "reorder" ? ` ${action.position}` : ""}`;
-        // The real inbound message owns Queue submission/deletion observation.
-        // Consuming this token before awaiting also prevents uncertain writes being retried.
-        const result = await executeQueue(input, guard);
-        guard();
-        if (result.kind !== "outcome" || result.outcome.type !== `thread-queue.${action.operation === "delete" ? "deleted" : action.operation === "start" ? "started" : "reordered"}`) throw unsupported();
-        this.clearQueueSelections(selection.target);
-        return this.panel(selection, { content: formatConversationCommandOutcome(result.outcome),
-          keyboard: { content: { rows: [{ buttons: [this.button(selection, "查看队列", { kind: "queue-page", page: 1 }), homeButton()] }] } } });
       }
       case "hook": return this.hookResult(selection, await this.options.commands.execute(selection.target, "hooks", action.input, selection.actorId, () => this.assertCurrent(selection)));
       case "hook-confirm": {
@@ -302,14 +263,6 @@ export class QqCommandMenuController {
         this.assertCurrent(selection);
         if (result.kind !== "auto-review") throw unsupported();
         return this.autoReview(selection, result);
-      }
-      case "goal-clear": {
-        const guard = () => { this.assertCurrent(selection); if (this.options.readyThread(selection.target) !== action.threadId) throw expired(); };
-        const result = await this.options.commands.execute(selection.target, "goal", "clear", selection.actorId, guard);
-        guard();
-        if (result.kind !== "outcome" || result.outcome.type !== "goal.cleared") throw unsupported();
-        return this.panel(selection, { content: "已清除当前会话目标。\n清除目标不等于中断正在运行的任务；如需停止，请使用 /stop。",
-          keyboard: { content: { rows: [{ buttons: [qqMenuButton("goal", "查询目标", "/goal"), homeButton()] }] } } });
       }
     }
     if (action.kind !== "model" || action.selection.kind === "model") {
@@ -361,163 +314,12 @@ export class QqCommandMenuController {
       detail: formatQqLiteralDetails(detail), markdownDetail: detail, delivered: () => this.activate(context, buttons) };
   }
 
-  private goal(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "goal" }>): QqMenuPanel {
-    const { threadId } = result;
-    if (this.options.readyThread(context.target) !== threadId || result.goal && result.goal.threadId !== threadId) throw expired();
-    const buttons = result.goal ? [this.button(context, "清除当前目标", { kind: "goal-clear", threadId }), homeButton()] : [homeButton()];
-    const detail = result.goal ? renderConversationCommandResult(result)! : "当前会话没有 Goal。";
-    const panel = this.panel(context, { content: "QQ 当前支持查询和清除目标；清除不等于停止当前任务。", keyboard: { content: { rows: [{ buttons }] } } });
-    return { ...panel, isCurrent: () => panel.isCurrent() && this.options.readyThread(context.target) === threadId,
-      detail: formatQqLiteralDetails(detail), markdownDetail: detail, delivered: () => this.activate(context, buttons) };
-  }
-
   private activate(context: MenuContext, buttons: QqMenuButton[]): void {
     if (!this.current(context)) return;
     for (const button of buttons) {
       const selection = this.selections.get(button.id);
       if (selection) selection.ready = true;
     }
-  }
-
-  cancelQueue(target: ConversationTarget): void {
-    const key = conversationTargetKey(target);
-    this.queueScopes.get(key)?.abort();
-    this.queueScopes.delete(key);
-    this.clearQueueSelections(target);
-  }
-
-  invalidateQueueSelections(target: ConversationTarget): void { this.clearQueueSelections(target); }
-
-  private clearQueueSelections(target: ConversationTarget): void {
-    const key = conversationTargetKey(target);
-    for (const [token, selection] of this.selections) if (selection.action.kind.startsWith("queue-")
-      && conversationTargetKey(selection.target) === key) this.selections.delete(token);
-  }
-
-  private queueContext(context: MenuContext): MenuContext {
-    if (context.queueSignal) { this.assertCurrent(context); return context; }
-    const threadId = this.options.readyThread(context.target);
-    if (!threadId) throw new UserFacingError("command.selection.expired", "请先选择并等待当前会话恢复完成，再管理 Queue。");
-    this.cancelQueue(context.target);
-    while (this.queueScopes.size >= MAX_SELECTIONS) {
-      const oldest = this.queueScopes.keys().next().value!;
-      this.queueScopes.get(oldest)!.abort(); this.queueScopes.delete(oldest);
-    }
-    const controller = new AbortController();
-    this.queueScopes.set(conversationTargetKey(context.target), controller);
-    return { ...context, queueSignal: controller.signal, queueThreadId: threadId };
-  }
-
-  private async readQueue(context: MenuContext, sharedPage: number): Promise<ThreadQueue> {
-    this.assertCurrent(context);
-    const result = await this.options.commands.execute(context.target, "queue", `list ${sharedPage}`, context.actorId, () => this.assertCurrent(context));
-    this.assertCurrent(context);
-    if (result.kind !== "thread-queue" || result.result.page !== sharedPage) throw unsupported();
-    return result;
-  }
-
-  private async queuePage(context: MenuContext, page: number): Promise<QqMenuPanel> {
-    if (!Number.isInteger(page) || page < 1 || page > 12) throw unsupported();
-    const result = await this.readQueue(context, Math.floor((page - 1) / 3) + 1);
-    // A queue can shrink between navigation clicks. Return the new last page.
-    if (result.result.page > result.result.pageCount) return this.queuePage(context, Math.max(1, result.result.pageCount) * 3 - 2);
-    return this.queueList(context, result, page);
-  }
-
-  private queueList(context: MenuContext, result: ThreadQueue, page: number): QqMenuPanel {
-    this.assertCurrent(context);
-    this.clearQueueSelections(context.target);
-    const shared = result.result;
-    if (shared.page > shared.pageCount) return this.queuePanel(context,
-      "本页已不存在，请返回队列首页。", [this.button(context, "队列首页", { kind: "queue-page", page: 1 })]);
-    const localCount = Math.max(1, Math.ceil(shared.items.length / 9));
-    const local = Math.min((page - 1) % 3, localCount - 1);
-    page = (shared.page - 1) * 3 + local + 1;
-    const entries = shared.items.slice(local * 9, local * 9 + 9);
-    const buttons = entries.map((item, index) => this.button(context,
-      `${(shared.page - 1) * 25 + local * 9 + index + 1} ${item.textPreview ?? formatThreadQueueInputTypeLabel(item.inputType)}`,
-      { kind: "queue-item", id: queueCommandId(item.id) }));
-    const lastPage = (shared.page - 1) * 3 + localCount;
-    const navigation = [
-      ...(page > 1 ? [this.button(context, "上一页", { kind: "queue-page", page: page - 1 })] : []),
-      this.button(context, "刷新", { kind: "queue-page", page }),
-      ...(local + 1 < localCount || shared.page < shared.pageCount
-        ? [this.button(context, "下一页", { kind: "queue-page", page: page === lastPage ? shared.page * 3 + 1 : page + 1 })] : []),
-    ];
-    const rows = buttonRows(buttons);
-    rows.push({ buttons: navigation }, { buttons: [qqMenuButton("queueadd", "新增排队文本", "/queue add ", false), homeButton()] });
-    const content = ["## App Server Queue\n", `第 ${page} 屏 · 共 ${shared.totalItemCount} 条 · 每屏最多九项\n`, "### 排队条目\n",
-      ...entries.map((item, index) => `${(shared.page - 1) * 25 + local * 9 + index + 1}. ${markdown(item.textPreview ?? formatThreadQueueInputTypeLabel(item.inputType), 130)}`),
-      ...entries.length ? [] : ["队列为空。"],
-      "\n点击条目查看完整安全摘要，再选择操作。",
-    ].join("\n");
-    return this.panel(context, { content, keyboard: { content: { rows } } });
-  }
-
-  private async findQueueItem(context: MenuContext, id: string): Promise<{ item: QueueItem; total: number }> {
-    queueCommandId(id);
-    // IDs survive ordering changes; a stale screen number must never select another item.
-    for (let page = 1; page <= 4; page += 1) {
-      const result = await this.readQueue(context, page);
-      const item = result.result.items.find(candidate => candidate.id === id);
-      if (item) return { item, total: result.result.totalItemCount };
-      if (page >= result.result.pageCount) break;
-    }
-    throw new UserFacingError("queue.item-not-found", "Queue 条目已不存在，请刷新队列列表。");
-  }
-
-  private async queueItem(context: MenuContext, id: string, deleting = false): Promise<QqMenuPanel> {
-    const { item } = await this.findQueueItem(context, id);
-    this.clearQueueSelections(context.target);
-    const buttons = deleting
-      ? [this.button(context, "确认删除", { kind: "queue-write", operation: "delete", id }), this.button(context, "取消", { kind: "queue-item", id })]
-      : [this.button(context, "启动此条", { kind: "queue-write", operation: "start", id }),
-        this.button(context, "删除此条", { kind: "queue-delete-preview", id }),
-        this.button(context, "调整位置", { kind: "queue-positions", id, page: 1 })];
-    const update = `/queue update ${id} `;
-    if (!deleting && item.editable && [...update].length <= 100) buttons.push(qqMenuButton("queueupdate", "更新文本", update, false));
-    const detail = [deleting ? "确认删除 Queue 条目？删除后无法通过 Gateway 恢复。" : "Queue 条目", `ID：${item.id}`,
-      `类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}`,
-      `安全摘要：${item.textPreview ?? "（无文本预览）"}`,
-      ...!deleting && item.editable && [...update].length > 100 ? [`更新文本请手动发送：${update}<新文本>`] : [],
-      "安全摘要不是完整排队正文。启动会执行该条原生 Queue 输入。",
-    ].join("\n");
-    return this.queuePanel(context, "核对上方完整条目信息后操作；停止、切换或过期后按钮失效。", buttons, detail);
-  }
-
-  private async queuePositions(context: MenuContext, id: string, page: number): Promise<QqMenuPanel> {
-    const { item, total } = await this.findQueueItem(context, id);
-    this.clearQueueSelections(context.target);
-    const pageCount = Math.max(1, Math.ceil(total / 9));
-    page = Math.min(page, pageCount);
-    const positions = Array.from({ length: total }, (_, index) => index + 1).slice((page - 1) * 9, page * 9);
-    const buttons = positions.map(position => this.button(context, `移至第 ${position} 位`, { kind: "queue-write", operation: "reorder", id, position }));
-    const navigation = [
-      ...(page > 1 ? [this.button(context, "上一页", { kind: "queue-positions", id, page: page - 1 })] : []),
-      this.button(context, "返回条目", { kind: "queue-item", id }),
-      ...(page < pageCount ? [this.button(context, "下一页", { kind: "queue-positions", id, page: page + 1 })] : []),
-    ];
-    const detail = [`调整 Queue 条目位置 · 第 ${page}/${pageCount} 页`, `ID：${item.id}`, `安全摘要：${item.textPreview ?? "（无文本预览）"}`,
-      `当前共 ${total} 条；选择目标位置后立即排序，其他条目的相对顺序保持。`].join("\n");
-    return this.queuePanel(context, "选择目标位置；执行时由 App Server 重新核对条目及当前队列。", buttons, detail, navigation);
-  }
-
-  private queuePanel(context: MenuContext, content: string, buttons: QqMenuButton[], detail?: string, navigation?: QqMenuButton[]): QqMenuPanel {
-    const rows = buttonRows(buttons);
-    if (navigation?.length) rows.push({ buttons: navigation });
-    rows.push({ buttons: [this.button(context, "队列首页", { kind: "queue-page", page: 1 }), homeButton()] });
-    const panel = this.panel(context, { content, keyboard: { content: { rows } } });
-    if (!detail) return panel;
-    const literal = formatQqLiteralDetails(detail);
-    try {
-      if (planText({ mode: "active", recipient: context.actorId, content: literal }).length > 7) throw new QqProtocolError("message", "invalid-input");
-    } catch (error) {
-      if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
-      this.clearQueueSelections(context.target);
-      throw new UserFacingError("queue.failed", "Queue 条目详情超出完整展示预算，请在本机核对。");
-    }
-    const markdownDetail = qqLiteralMarkdown(detail);
-    return { ...panel, detail: literal, ...(markdownDetail === undefined ? {} : { markdownDetail }), delivered: () => this.activate(context, buttons) };
   }
 
   private extensionPanel(context: MenuContext, view: QqExtensionView): QqMenuPanel {
@@ -886,11 +688,6 @@ export class QqCommandMenuController {
 }
 
 function homeButton(): QqMenuButton { return qqMenuButton("home", "首页", "/help"); }
-function queueCommandId(id: string): string {
-  // Pure numbers are shared list selectors, never an exact Queue ID command.
-  if (!id || /[\s\p{Cc}\p{Cf}]/u.test(id) || /^\d+$/u.test(id)) throw unsupported();
-  return id;
-}
 function buttonRows(buttons: QqMenuButton[], columns?: number): QqCommandKeyboard["content"]["rows"] {
   const rowCount = Math.ceil(buttons.length / (columns ?? 3));
   const rowSize = columns !== undefined && rowCount ? Math.ceil(buttons.length / rowCount) : 3;

@@ -4,7 +4,6 @@ import {
   type ConversationStatusDisplay,
 } from "../application/index.js";
 import {
-  type ThreadGoal,
   type ThreadApprovalsReviewer,
   usesOpenAiAccount,
 } from "../conversation-core/index.js";
@@ -110,19 +109,6 @@ export function formatConversationCollaborationMode(
   return structured ? toStructuredMarkdownList(text) : text;
 }
 
-export function formatConversationGoal(
-  result: Extract<ConversationCommandResult, { kind: "goal" }>,
-): string {
-  return result.goal
-    ? toStructuredMarkdownList([
-        "## 当前目标",
-        `当前 Goal：${result.goal.objective}`,
-        `状态：${formatGoalStatus(result.goal.status)}`,
-        `Tokens：${formatGoalTokens(result.goal)}`,
-      ].join("\n"))
-    : "当前 Session 没有 Goal。使用 /goal set <目标> 设置。";
-}
-
 export function isAutoApprovalReviewer(reviewer: ThreadApprovalsReviewer | null | undefined): boolean {
   return reviewer === "auto_review" || reviewer === "guardian_subagent";
 }
@@ -173,7 +159,6 @@ export function formatConversationStatus(
   } else {
     lines.push(field("上下文", status.threadId ? "等待 App Server 推送统计" : "尚未绑定会话，暂无用量"));
   }
-  if (status.goal) lines.push(field("目标状态", `${formatGoalStatus(status.goal.status)} · /goal`));
   if (status.threadId) {
     if (!status.executionContext) lines.push(field("执行目录", "尚未由 App Server 确认"));
     else if (status.executionContext.cwd !== status.cwd) lines.push(field("执行目录与工作区不同", status.executionContext.cwd));
@@ -195,26 +180,3 @@ export function formatConversationStatus(
 }
 
 export { formatConversationMetrics } from "./metrics-format.js";
-
-function formatGoalStatus(status: ThreadGoal["status"]): string {
-  switch (status) {
-    case "active":
-      return "进行中";
-    case "paused":
-      return "已暂停";
-    case "blocked":
-      return "已阻塞";
-    case "usageLimited":
-      return "用量受限";
-    case "budgetLimited":
-      return "预算已用尽";
-    case "complete":
-      return "已完成";
-  }
-}
-
-function formatGoalTokens(goal: ThreadGoal): string {
-  return goal.tokenBudget === null
-    ? formatTokenCount(goal.tokensUsed)
-    : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
-}

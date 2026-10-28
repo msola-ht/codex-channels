@@ -73,7 +73,6 @@ export interface AccountRateLimitWindow {
 export interface AccountRateLimit {
   limitId: string;
   limitName: string | null;
-  normalModelSlug: string | null;
   primary: AccountRateLimitWindow | null;
   secondary: AccountRateLimitWindow | null;
   credits: {
@@ -94,7 +93,6 @@ export interface AccountRateLimit {
 
 export interface AccountRateLimits {
   limits: AccountRateLimit[];
-  ordinaryUsageLimit: AccountRateLimit;
   resetCreditsAvailable: AccountMetric | null;
   /**
    * 每条服务端重置券明细的到期时间；`null` 元素表示该券没有到期时间。
@@ -102,13 +100,6 @@ export interface AccountRateLimits {
    */
   resetCreditExpiresAt?: Array<number | null> | null;
   accountId: string | null;
-  ordinaryUsageAllowed: boolean | null;
-  lunaReserve: {
-    blockedModelSlug: string | null;
-    title: string;
-    description: string;
-  } | null;
-  unsupportedUpsellPresent: boolean;
 }
 
 export interface AccountWeeklyLimitEstimate {

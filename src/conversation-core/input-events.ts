@@ -6,20 +6,11 @@ import type {
   MessagePhase,
   OperationUpdate,
   RateLimitSnapshot,
-  ThreadGoal,
   ThreadTokenUsage,
   TurnErrorCode,
   TurnPlanStep,
   TurnStatus,
 } from "./events.js";
-
-/** Transient official identity only; no message content or presentation lifecycle. */
-export interface UserMessageIdentity {
-  readonly threadId: string;
-  readonly turnId: string;
-  readonly itemId: string;
-  readonly clientUserMessageId: string;
-}
 
 export type ConversationInputEvent =
   | { type: "hook.completed"; threadId: string; hook: HookCompletion }
@@ -30,8 +21,6 @@ export type ConversationInputEvent =
       turnId: string;
       tokenUsage: ThreadTokenUsage;
     }
-  | { type: "thread.goal.updated"; threadId: string; goal: ThreadGoal }
-  | { type: "thread.goal.cleared"; threadId: string }
   | { type: "thread.reverted"; threadId: string }
   | { type: "turn.diff.updated"; threadId: string; turnId: string; diff: string }
   | {

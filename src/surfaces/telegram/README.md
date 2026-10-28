@@ -37,7 +37,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   接收时先登记Surface取消范围，等待此前停止处理结束后建立Application提交作用域；刷新前序输入完成后、下载前捕获工作区与Thread，提交时在会话锁内复核绑定和授权，绑定改变时明确拒绝；
   未配置 `videoDirectory` 时明确拒绝视频，关闭时取消下载，迟到结果不提交；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
-  `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的
+  `/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的
   Gateway 计划任务；创建与删除预览提供原生确认/返回列表按钮，返回只关闭该消息按钮，不撤销五分钟内有效的业务确认码；选择支持多个思考等级的模型后及直接打开 `/effort` 面板时提供思考等级内联按钮；
   同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
@@ -55,7 +55,6 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   思考等级提交后的新菜单按与刷新相同的 Provider 浏览范围及可选目录生成；操作本身仍用当前模型所属目录验证能力，真实目录或会话变化继续使旧按钮失效。
   模型与提供商菜单复用共享当前/待生效状态、切换后果及连续选择提示；速度命令及能力提示复用共享命令格式器。
   状态、请求指标、账户用量/额度、工作区、模型、会话、协作模式与操作结果由 Bot 注入发送器，经既有有序队列和 API Executor 逐片复核原 Actor 授权及查询作用域；成功切换按结构化结果确认新作用域，不阻断失效工作区的选择恢复。状态面板三个查询按钮只映射已有 metrics/usage/limits 命令，点击查询当前作用域，发送期间变化则拒绝旧结果。
-  Goal 查询使用 Application 返回的精确 Thread 身份，允许首次查询准备会话；排队期间切换到其他 Thread 或撤权仍拒绝旧结果。
   思考按钮依据目录能力将 `enabled` / `none` 显示为开启/关闭思考，其他等级原样显示，回调仍引用原始目录选项；
   重置券复用内联按钮，选券令牌绑定用户、聊天与实时列表，
   确认及取消调用 Application 的一次性确认入口。
@@ -71,7 +70,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   使用独立的可编辑过程消息，不把整个 Turn 的操作堆到同一条消息；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
-分支、官方 Turn 总耗时、模型请求与 Token 统计、当前 Goal、上下文压缩总次数和用量；不显示
+分支、官方 Turn 总耗时、模型请求与 Token 统计、上下文压缩总次数和用量；不显示
   模型请求聚合耗时；首 Token 与速度复用共享完成卡的本轮及会话汇总。最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown；已完成且非 commentary 的短正文即使未提供 phase，也按该设置格式化，
   HTML 长回复按 3500 可见字符单位分段；选择 rich 时按完整块规划每片最多 5000 个 Unicode 码点，与飞书和 QQ 主动 Markdown 正文的阅读预算一致，不再被 HTML 长消息路径提前截走。超大或未闭合块、交互保留标题在发送前选择 HTML；超过 16000 字符或满足现有长代码条件的正文仍使用预览加附件。明确的格式拒绝只降级当前分段；网络结果不确定时停止本次发送，Turn 完成不重播失败正文；完成的原生 `imageGeneration`
@@ -141,7 +140,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
 - `plugin-task-prompts.ts`：把 Plugin 选择后的 ForceReply 提示绑定到聊天、Actor 与精确消息，
   使用十分钟一次性内存状态和 100 项容量上限；过期、跨 Actor 与重复回复不会进入普通 Turn。
-- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、
+- `format.ts`：格式化会话、Diff/Plan、模型、Workspace、Git 分支、权限、用量、缓存命中率、
   上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
   由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段并把结构化字段渲染为
   紧凑项目符号列表，上线与 Turn 结束统计在所有呈现档位显示工作区和 Git 分支。
@@ -164,13 +163,9 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
 遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。Bot API 的代理连接启用 Keep-Alive，
 由 Surface 关闭时释放连接池；主动取消的请求不进入自动重试。
-下一 Turn 输入由 App Server Queue 持久保存，Application 提供受控管理入口，不得复用本目录的 Telegram 输出队列；Telegram 只负责
-命令解析及位置、容量和 App Server 持久队列语义提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
-条目按钮使用完整 Queue ID，进入后可启动或删除，删除必须二次确认。新增、更新和排序继续使用文本命令，
-不建立渠道私有 Queue 状态。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
-分组列表，常用入口摘要复用共享命令目录并置于附件说明前，只在 Telegram 边界转换为安全 HTML。Queue／Goal 从原生命令菜单及帮助中隐藏，原处理器与手动命令保留；菜单过滤只在生命周期注册输出中使用，不过滤执行注册。无参数 `/skill` 与其他渠道一样展示编号列表，
+分组列表，常用入口摘要复用共享命令目录并置于附件说明前，只在 Telegram 边界转换为安全 HTML。Queue／Goal 的命令、回调与专属展示已移除。无参数 `/skill` 与其他渠道一样展示编号列表，
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 
 模型页的“返回提供商”沿原 `/model` 空参数清除浏览筛选，回调仍复核 Actor、目录令牌和选择作用域。模型／提供商／思考按钮区分当前与待生效已选，未知 Provider 不标记默认项；工作区和 Plugin 按钮保留正文编号，长标签按原 UTF-16 预算截断且不拆码点。模型、工作区、历史及归档正文复用共享分段清单；不新增命令或渠道私有历史索引。

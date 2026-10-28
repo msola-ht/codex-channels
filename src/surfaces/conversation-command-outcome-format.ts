@@ -1,7 +1,6 @@
 import type { ConversationCommandOutcome } from "../application/index.js";
 
 import {
-  formatQueueItem,
   formatTakeoverSource,
 } from "./conversation-session-command-format.js";
 import {
@@ -107,32 +106,6 @@ export function formatConversationCommandOutcome(
       return outcome.stopped
         ? toStructuredMarkdownList(["已请求停止当前任务。"].join("\n"))
         : toStructuredMarkdownList(["当前没有运行中的任务。"].join("\n"));
-    case "thread-queue.added":
-      return toStructuredMarkdownList([
-        "已写入 App Server Queue",
-        formatQueueItem(outcome.item),
-        "该条目由 App Server 持久保存；Gateway 重启不会清空。",
-      ].join("\n"));
-    case "thread-queue.updated":
-      return toStructuredMarkdownList([
-        "已更新 App Server Queue 条目",
-        formatQueueItem(outcome.item),
-      ].join("\n"));
-    case "thread-queue.deleted":
-      return toStructuredMarkdownList([
-        outcome.deleted ? "已删除 App Server Queue 条目" : "Queue 条目已不存在",
-      ].join("\n"));
-    case "thread-queue.reordered":
-      return toStructuredMarkdownList([
-        "已重新排序 App Server Queue",
-        `条目：${outcome.itemId}`,
-        `位置：${outcome.position}/${outcome.totalItemCount}`,
-      ].join("\n"));
-    case "thread-queue.started":
-      return toStructuredMarkdownList([
-        "已启动 App Server Queue 条目",
-        `Turn：${outcome.turnId}`,
-      ].join("\n"));
     case "thread.reverted":
       return toStructuredMarkdownList([
         "已回退 Session 历史",
@@ -197,13 +170,6 @@ export function formatConversationCommandOutcome(
             `角色：${outcome.roleName}`,
             `Turn：${outcome.turnId}`,
           ].join("\n"));
-    case "goal.cleared":
-      return toStructuredMarkdownList(["已清除当前 Session Goal。"].join("\n"));
-    case "goal.updated":
-      return toStructuredMarkdownList([
-        "Goal 已设置",
-        `目标：${outcome.goal.objective}`,
-      ].join("\n"));
     case "scheduled-task.created":
     case "scheduled-task.deleted":
     case "scheduled-task.renamed":

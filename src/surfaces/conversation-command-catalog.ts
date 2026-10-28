@@ -1,10 +1,5 @@
 import type { ConversationCommandName } from "../application/index.js";
 
-/** Discovery only: hidden commands remain supported by the original command handlers. */
-export function isConversationCommandVisible(name: ConversationCommandName): boolean {
-  return name !== "queue" && name !== "goal";
-}
-
 /** Presentation metadata only. Application and channel handlers still own admission and execution. */
 export const conversationCommandCatalog = {
   resume: { label: "会话切换", description: "列出或恢复 Codex 会话" },
@@ -19,7 +14,6 @@ export const conversationCommandCatalog = {
   workspace: { label: "工作区", description: "列出或切换 Workspace" },
   autoreview: { label: "当前会话审批方式", description: "查看或切换当前会话审批方式" },
   stop: { label: "停止任务", description: "停止当前任务" },
-  queue: { label: "App Server Queue", description: "管理 App Server 持久队列" },
   revert: { label: "历史回退", description: "回退当前 Session 的分页历史" },
   rename: { label: "重命名", description: "命名当前会话" },
   compact: { label: "压缩上下文", description: "压缩当前上下文" },
@@ -38,7 +32,6 @@ export const conversationCommandCatalog = {
   permissions: { label: "权限查询", description: "查看权限配置" },
   diff: { label: "Diff", description: "查看当前 Turn Diff" },
   plan: { label: "Plan 模式", description: "切换 Plan 模式或直接开始规划" },
-  goal: { label: "Goal", description: "查看或管理 Goal" },
   agents: { label: "子代理", description: "查看或调用子代理" },
   release: { label: "释放占用", description: "查看或释放被占用的 Codex 会话" },
   schedule: { label: "计划任务", description: "管理 Gateway 计划任务" },

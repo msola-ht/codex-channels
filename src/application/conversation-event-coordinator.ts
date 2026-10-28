@@ -2,14 +2,9 @@ import type { ConversationInputEvent } from "../conversation-core/index.js";
 import type { ConversationService } from "./conversation-service.js";
 
 type ConversationEventUseCases = Pick<ConversationService,
-  | "invalidateQueueSnapshot"
   | "invalidateRevertSnapshot"
   | "invalidateSessionDisplayCache"
   | "clearPendingSelectionsForThread"
-  | "markLunaReserveUsageLimit"
-  | "clearLunaReserveThread"
-  | "clearLunaReserveAccountState"
-  | "recoverLunaReserveAfterTurn"
   | "handleMcpOAuthCompleted"
   | "clearMcpLoginThread"
 >;
@@ -30,7 +25,6 @@ export class ConversationEventCoordinator {
   ) {}
 
   queueChanged(threadId: string): void {
-    this.conversations.invalidateQueueSnapshot(threadId);
     this.conversations.invalidateRevertSnapshot(threadId);
   }
 
@@ -66,31 +60,11 @@ export class ConversationEventCoordinator {
       this.conversations.clearPendingSelectionsForThread(event.threadId);
     }
     if (
-      event.type === "turn.error"
-      && !event.willRetry
-      && event.errorCode === "usageLimitExceeded"
-    ) {
-      this.conversations.markLunaReserveUsageLimit(event.threadId, event.turnId);
-    }
-    if (
-      event.type === "turn.completed"
-      && event.errorCode === "usageLimitExceeded"
-    ) {
-      this.conversations.markLunaReserveUsageLimit(event.threadId, event.turnId);
-    }
-    if (
       event.type === "thread.closed"
       || event.type === "thread.archived"
       || event.type === "thread.deleted"
     ) {
-      this.conversations.clearLunaReserveThread(event.threadId);
       this.conversations.clearMcpLoginThread(event.threadId);
-    }
-    if (
-      event.type === "account.updated"
-      && (event.modelProvider ?? "openai") === "openai"
-    ) {
-      this.conversations.clearLunaReserveAccountState();
     }
     if (event.type === "thread.status.changed" && event.status !== "active") {
       // A completion can race the native idle contributor. Retry only a
@@ -107,8 +81,5 @@ export class ConversationEventCoordinator {
       this.effects.retryBackgroundRelease(event.threadId, "subagent-terminal");
     }
     this.effects.reduce(event);
-    if (event.type === "turn.completed") {
-      this.conversations.recoverLunaReserveAfterTurn(event.threadId, event.turnId);
-    }
   }
 }

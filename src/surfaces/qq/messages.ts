@@ -3,8 +3,8 @@ import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import type { Logger } from "pino";
 import type { InteractionRequest } from "../../approval/index.js";
-import { parseThreadQueueOperation, type ConversationCommandExecutor, type ConversationCommandResult, type ConversationSessionUseCases, type ConversationTurnUseCases, type ScheduledTaskConfirmation } from "../../application/index.js";
-import { UserFacingError, type ConversationTarget, type OutputEvent, type UserMessageIdentity } from "../../conversation-core/index.js";
+import type { ConversationCommandExecutor, ConversationSessionUseCases, ConversationTurnUseCases, ScheduledTaskConfirmation } from "../../application/index.js";
+import { UserFacingError, type ConversationTarget, type OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { SurfaceDeliveryNotSentError, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { SurfaceOutputPort, SurfaceDeliverySource, SurfaceNotificationDeliverySource, SurfaceScheduledTaskSubmissionContext, SurfaceAsyncAnswerSubmission, SurfaceConfigurationChange, OperationUpdateDisplay } from "../types.js";
@@ -21,7 +21,6 @@ import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
 import type { QqMessageInput } from "./message-input.js";
 import { QqTaskSources, type QqTaskScope, type QqTaskTicket } from "./task-sources.js";
-import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, qqMessageFailureMetadata, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
@@ -84,7 +83,6 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly tasks = new Set<Promise<void>>();
   private configurationNotifications = 0;
   private readonly sources: QqTaskSources;
-  private readonly queueSources: QqQueueSources;
   private readonly scheduledSources: QqTaskSources;
   private readonly outbox: QqTextOutbox;
   private readonly streaming: QqBodyStreaming;
@@ -108,7 +106,6 @@ export class QqMessages implements SurfaceOutputPort {
       ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
       planUpdatesEnabled: options.planUpdatesEnabled ?? true, operationUpdates: options.operationUpdateDisplay ?? "compact" });
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
-    this.queueSources = new QqQueueSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.scheduledSources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.scheduledCurrent(scope, threadId) });
     this.schedules = new QqScheduleMenu({ commands: options.commands, scope: target => this.scheduleScope(target),
       allowed: (target, actorId) => this.allowed(target, actorId), signal: this.lifetime.signal });
@@ -119,7 +116,6 @@ export class QqMessages implements SurfaceOutputPort {
       scope: target => this.menuScope(target),
       workspaceScope: target => this.menuWorkspaceScope(target),
       selectionScope: target => this.options.service.status(target).selectionScope,
-      readyThread: target => this.readyThread(target),
       queryScope: target => this.extensionQueryScope(target),
       allowed: (target, actorId) => this.allowed(target, actorId),
       beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); this.management.cancel(target); this.menus.cancelManagement(target); if (!preserveRevert) this.menus.cancelRevert(target); this.cancelSources(target); this.interactions.cancelTarget(target); },
@@ -158,14 +154,6 @@ export class QqMessages implements SurfaceOutputPort {
     },
   };
 
-  observeUserMessageIdentity(identity: Readonly<UserMessageIdentity>): void { this.queueSources.observeIdentity(identity); }
-
-  observeQueueChanged(target: ConversationTarget, threadId: string): void {
-    if (target.surface === "qq" && target.accountId === this.options.appId && this.readyThread(target) === threadId) {
-      this.menus.invalidateQueueSelections(target);
-    }
-  }
-
   prepareScheduledTaskSubmission(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission {
     const { target, actorId, workspaceId, workspaceCwd, threadId, runId } = context;
     if (target.surface !== "qq" || target.accountId !== this.options.appId || qqConversationActor(target.conversationId) !== actorId
@@ -195,16 +183,13 @@ export class QqMessages implements SurfaceOutputPort {
     await task;
   }
 
-  private sourceRegistry(reference: { generation: string }): QqTaskSources | QqQueueSources {
-    return reference.generation === this.queueSources.generation ? this.queueSources
-      : reference.generation === this.scheduledSources.generation ? this.scheduledSources : this.sources;
+  private sourceRegistry(reference: { generation: string }): QqTaskSources {
+    return reference.generation === this.scheduledSources.generation ? this.scheduledSources : this.sources;
   }
 
   private cancelSources(target: ConversationTarget): void {
     this.progress.cancelTarget(target);
     this.sources.cancelTarget(target);
-    this.queueSources.cancelTarget(target);
-    this.menus.cancelQueue(target);
     this.schedules.cancel(target);
   }
 
@@ -214,7 +199,6 @@ export class QqMessages implements SurfaceOutputPort {
     if (event.type === "subagent.completed") {
       if (!event.parentTurnId) return;
       const source = this.scheduledSources.capture(event.target, event.parentThreadId, event.parentTurnId)
-        ?? this.queueSources.capture(event.target, event.parentThreadId, event.parentTurnId)
         ?? this.sources.capture(event.target, event.parentThreadId, event.parentTurnId);
       if (source) this.admitted.set(event, source);
       return;
@@ -245,7 +229,6 @@ export class QqMessages implements SurfaceOutputPort {
       && this.displaySettings(event.target).streamingEnabled && !this.displaySettings(event.target).commentaryEnabled;
     if ((!this.supported(event) && event.type !== "turn.started" && !withheldDelta) || !("threadId" in event) || !("turnId" in event)) return;
     const source = this.scheduledSources.capture(event.target, event.threadId, event.turnId)
-      ?? this.queueSources.capture(event.target, event.threadId, event.turnId)
       ?? this.sources.capture(event.target, event.threadId, event.turnId);
     if (source) this.admitted.set(event, source);
   }
@@ -670,46 +653,6 @@ export class QqMessages implements SurfaceOutputPort {
     for (const controller of this.pendingCallbacks.get(target.conversationId) ?? []) controller.abort();
   }
 
-  private async executeQueue(message: QqMessageInput, target: ConversationTarget, input: string, guard: () => void): Promise<ConversationCommandResult> {
-    const operation = parseThreadQueueOperation(input);
-    const scope = this.scope(message.actorId, target.conversationId);
-    const context = this.extensionQueryScope(target);
-    let ticket: QqQueueTicket | undefined;
-    const observed: { attempted: boolean; outcome?: "not-submitted" | "confirmed" | "unknown" } = { attempted: false };
-    const assertCurrent = () => {
-      guard();
-      if (!scope || !this.current(scope) || this.extensionQueryScope(target) !== context
-        || ticket && !ticket.isCurrent()) throw new UserFacingError("command.selection.expired", "队列操作已取消或上下文变化，请重新打开 Queue。");
-    };
-    assertCurrent();
-    if (operation.type === "add" || operation.type === "start") {
-      const reserved = this.queueSources.reserve(scope!, message);
-      if (reserved.kind !== "accepted") throw new UserFacingError("queue.failed", "当前队列输入无法接纳，请核对状态后重试。");
-      ticket = reserved.ticket;
-    }
-    try {
-      return await this.options.commands.execute(target, "queue", input, message.actorId, assertCurrent, undefined, {
-        ...(ticket ? { submission: {
-          prepared: ticket.observer.prepared,
-          requestAttempted: () => { observed.attempted = true; return ticket.observer.requestAttempted(); },
-          confirmed: ticket.observer.confirmed,
-          settled: value => { observed.outcome = value.outcome; return ticket.observer.settled(value); },
-        } } : {}),
-        deleted: value => {
-          assertCurrent();
-          this.queueSources.deleted(value.threadId, value.queuedSubmissionId);
-        },
-      });
-    } catch (error) {
-      ticket?.cancel();
-      if (observed.attempted && observed.outcome !== "confirmed" && observed.outcome !== "not-submitted"
-        && (!(error instanceof UserFacingError) || error.code === "queue.failed")) {
-        throw new UserFacingError("queue.failed", "Queue 提交结果未确认", { reason: "submission-unconfirmed" });
-      }
-      throw error;
-    }
-  }
-
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
     if ("rejection" in message) {
       const reason = message.rejection;
@@ -770,34 +713,9 @@ export class QqMessages implements SurfaceOutputPort {
           panel.delivered?.();
           return;
         }
-        if (command.name === "queue") {
-          const fixed = this.extensionQueryScope(target);
-          const guard = () => {
-            if (!this.allowed(target, message.actorId) || this.extensionQueryScope(target) !== fixed) {
-              throw new UserFacingError("command.selection.expired", "队列上下文已变化，请重新打开 Queue。");
-            }
-          };
-          const result = await this.executeQueue(message, target, command.argumentsText, guard);
-          guard();
-          const menu = await this.menus.fromResult(target, message.actorId, result);
-          stage = "reply";
-          const current = () => {
-            try { guard(); return !menu || menu.isCurrent(); } catch { return false; }
-          };
-          if (menu) {
-            await this.reply(message, menu.content, current, undefined, menu.keyboard, menu.detail, menu.markdownDetail);
-            menu.delivered?.();
-          } else {
-            const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome) : renderConversationCommandResult(result);
-            if (!text) throw new Error("QQ Queue 没有可交付结果");
-            await this.reply(message, text, current);
-          }
-          return;
-        }
         const taskCommand = isQqTaskCommand(command.name, command.argumentsText);
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "review", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "review", "effort", "fast", "plan", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
           || (["stop", "new", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
-          || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))
           || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !taskCommand && !isQqExtensionOperation(command.name, command.argumentsText))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
@@ -807,8 +725,7 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         if (command.name === "help" || command.name === "revert" || command.name === "hooks") {
-          const menu = await (command.name === "help" ? this.menus.open(target, message.actorId, command.argumentsText,
-            (input, guard) => this.executeQueue(message, target, input, guard))
+          const menu = await (command.name === "help" ? this.menus.open(target, message.actorId, command.argumentsText)
             : command.name === "hooks" ? this.menus.hooks(target, message.actorId, command.argumentsText)
             : this.menus.revert(target, message.actorId, command.argumentsText));
           stage = "reply";
@@ -827,7 +744,7 @@ export class QqMessages implements SurfaceOutputPort {
           commandTicket = reservation.ticket;
         }
         const extensionScope = !taskCommand && EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
-        const hasSelectionMenu = extensionScope !== undefined || ["status", "usage", "limits", "workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
+        const hasSelectionMenu = extensionScope !== undefined || ["status", "usage", "limits", "workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
@@ -838,20 +755,14 @@ export class QqMessages implements SurfaceOutputPort {
             && (command.name !== "usage" && command.name !== "limits"
               || current.modelProvider === queryStatus.modelProvider && !current.sessionRestoring);
         };
-        const fixedScope = !taskCommand && ["effort", "fast", "plan", "goal", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
-        const goalThread = command.name === "goal" ? this.readyThread(target) : undefined;
-        if (command.name === "goal" && !goalThread) {
-          await this.reply(message, "请先选择并等待当前会话恢复完成，再查询或清除目标。QQ 暂不支持创建目标。", () => this.allowed(target, message.actorId));
-          return;
-        }
+        const fixedScope = !taskCommand && ["effort", "fast", "plan", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
         const assertCurrent = () => {
           if (!this.allowed(target, message.actorId)) throw new UserFacingError("command.authorization-changed", "QQ 命令所属连接已关闭或操作者授权已变化。");
           if (commandTicket && !commandTicket.isCurrent()) throw new UserFacingError("command.selection.expired", "任务准备已取消、过期或失权，请核对任务状态。");
           if (extensionScope !== undefined && this.extensionQueryScope(target) !== extensionScope) throw new UserFacingError("command.selection.expired", "查询上下文已变化，请重新打开扩展查询。");
-          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
-            || goalThread !== undefined && this.readyThread(target) !== goalThread) throw new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。");
+          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope) throw new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。");
         };
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "review" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "goal" | "permissions" | "autoreview" | "skill" | "agents" | "plugin" | "mcp" | "hooks" | "release", command.argumentsText, message.actorId, assertCurrent, commandTicket?.observer);
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "review" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "permissions" | "autoreview" | "skill" | "agents" | "plugin" | "mcp" | "hooks" | "release", command.argumentsText, message.actorId, assertCurrent, commandTicket?.observer);
         const sessionReplyScope = taskCommand || ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
           ? this.menuScope(target) : undefined;
         stage = "render";
@@ -889,7 +800,6 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         const text = result.kind === "collaboration-mode" ? formatConversationCollaborationMode(result, false)
-          : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
           : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome, undefined, false)
           : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
@@ -897,8 +807,7 @@ export class QqMessages implements SurfaceOutputPort {
         await this.reply(message, text, () => {
           if (!scope || !this.current(scope)) return false;
           if (commandTicket?.signal.aborted) return false;
-          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
-            || goalThread !== undefined && this.readyThread(target) !== goalThread) return false;
+          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope) return false;
           if (sessionReplyScope !== undefined && this.menuScope(target) !== sessionReplyScope) return false;
           if (result.kind === "outcome" && result.outcome.type === "thread.forked"
             && this.options.service.status(target).threadId !== result.outcome.threadId) return false;
@@ -907,7 +816,7 @@ export class QqMessages implements SurfaceOutputPort {
           ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
           : undefined, undefined, undefined,
-          result.kind === "outcome" && result.outcome.type !== "goal.cleared"
+          result.kind === "outcome"
             ? formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral)
             : result.kind === "usage" && result.result.kind === "cloud-usage"
               ? renderConversationCommandResult(result, undefined, escapeLifecycleLiteral) ?? undefined : undefined,
@@ -1153,10 +1062,6 @@ export class QqMessages implements SurfaceOutputPort {
     return JSON.stringify([this.menuWorkspaceScope(target), exists
       ? this.options.service.status(target).threadId : "workspace-missing"]);
   }
-  private readyThread(target: ConversationTarget): string | undefined {
-    const status = this.options.service.status(target);
-    return status.sessionRestoring === false ? status.threadId : undefined;
-  }
   private notificationCurrent(reference: SurfaceNotificationDeliverySource): boolean {
     const entry = this.notificationSources.get(reference.sourceToken);
     if (!entry) return false;
@@ -1235,7 +1140,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
   async close(): Promise<void> {
     this.progress.close();
-    this.lifetime.abort(); this.sources.close(); this.queueSources.close(); this.scheduledSources.close(); this.schedules.close(); this.management.close(); this.menus.clear(); this.notificationSources.clear();
+    this.lifetime.abort(); this.sources.close(); this.scheduledSources.close(); this.schedules.close(); this.management.close(); this.menus.clear(); this.notificationSources.clear();
     await Promise.all([this.interactions.close(), this.streaming.close(), this.outbox.close()]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

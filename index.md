@@ -42,7 +42,7 @@
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：Codex、飞书与微信的上游源码基线及待升级候选。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、0.164.0 关联适配与升级决策、
   不采用原因、重新评估条件与基线升级影响。
-- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Thread Queue、
+- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Queue 只读保护、
   分页历史与 Revert 的授权边界和验收链路。
 - [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：
   OpenAI Thread 官方估算合入现有 `/usage` 的数据口径、降级、模块与验证边界。

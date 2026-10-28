@@ -7,7 +7,6 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
-  type UserMessageIdentity,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
@@ -317,31 +316,6 @@ export class SurfaceManager {
       isCurrent: () => isCurrent() && submission.isCurrent(),
       cancel: () => submission.cancel(),
     };
-  }
-
-  /** Live synchronous port; never enters output queues or durable delivery. */
-  forwardUserMessageIdentity(target: ConversationTarget, identity: Readonly<UserMessageIdentity>): void {
-    if (this.stopping || !this.acceptingOutput) return;
-    const account = surfaceAccountKey(target.surface, target.accountId);
-    const surface = this.surfacesByAccount.get(account);
-    if (!surface || surface.connectionOnly || this.suspended.has(account)
-      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
-    try {
-      surface.output.observeUserMessageIdentity?.(identity);
-    } catch {
-      // Observer errors must neither block the App Server reader nor expose content.
-      this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface 用户消息身份观察失败");
-    }
-  }
-
-  forwardQueueChanged(target: ConversationTarget, threadId: string): void {
-    if (this.stopping || !this.acceptingOutput) return;
-    const account = surfaceAccountKey(target.surface, target.accountId);
-    const surface = this.surfacesByAccount.get(account);
-    if (!surface || surface.connectionOnly || this.suspended.has(account)
-      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
-    try { surface.output.observeQueueChanged?.(target, threadId); }
-    catch { this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface Queue 选择失效通知失败"); }
   }
 
   executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {

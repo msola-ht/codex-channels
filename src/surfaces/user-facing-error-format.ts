@@ -5,7 +5,6 @@ import {
   pluginCommandUsageText,
   sessionCommandUsageText,
   scheduledTaskCommandUsageText,
-  threadQueueCommandUsageText,
   threadRevertCommandUsageText,
 } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
@@ -155,10 +154,6 @@ export function formatSurfaceUserFacingError(
       return "会话绑定或工作区已发生变化，请重新打开会话列表后再试";
     case "thread.workspace.changed":
       return "会话执行目录或订阅已变化，本次操作未通过会话校验。请用 /status 核对；目录不匹配时，在原生端恢复目录，或用 /workspace 选择对应的已登记工作区后重新选择会话。";
-    case "goal.empty":
-      return "目标不能为空";
-    case "goal.usage":
-      return "用法：/goal [set <目标>|clear]";
     case "release.usage":
       return "用法：/release [force]";
     case "release.unsupported":
@@ -171,8 +166,6 @@ export function formatSurfaceUserFacingError(
     case "scheduled-task.snapshot.required":
     case "scheduled-task.state.invalid":
       return error.message;
-    case "queue.usage":
-      return threadQueueCommandUsageText;
     case "metrics.usage":
       return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d|90d|all]";
     case "status.usage":
@@ -181,30 +174,12 @@ export function formatSurfaceUserFacingError(
       return "Ollama 用法：/usage [24h|7d|30d] [refresh]；其他账户请使用 /usage。";
     case "usage.account-changed":
       return "账户已切换，请重新执行 /usage。";
-    case "queue.full":
-      return "App Server Queue 已满，最多 100 条";
     case "queue.unavailable":
-      return "当前 App Server 不提供持久队列";
-    case "queue.empty":
-      return "App Server Queue 为空，请先使用 /queue add 新增条目";
-    case "queue.busy":
-      return "当前 Session 有活动或待触发 Turn，请稍后重试";
+      return "当前 App Server 不提供原生队列读取能力，无法安全确认会话状态。";
     case "queue.pending-overrides":
-      return "Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成";
-    case "queue.snapshot.required":
-      return "数字选择器只对最近五分钟的本会话 Queue 列表有效，请先执行 /queue list";
-    case "queue.item-not-found":
-      return "找不到指定 Queue 条目，请使用完整 ID 或刷新 /queue list";
-    case "queue.item-not-editable":
-      return "只有纯文本 Queue 条目可以更新；非纯文本输入可删除、排序或启动，但不能更新";
-    case "queue.position.invalid":
-      return "Queue 目标位置必须在当前队列范围内";
-    case "queue.reorder-conflict":
-      return "Queue 已发生变化，请刷新 /queue list 后重试排序";
+      return "原生队列尚有待处理输入，请先在原生客户端处理完成后再修改模型、思考、速度或 Plan 选择。";
     case "queue.failed":
-      return error.details.reason === "submission-unconfirmed"
-        ? "Queue 提交结果未确认，任务可能已开始；请用 /queue list、/status 或在本机核对，勿直接重复提交"
-        : "Queue 操作失败，请稍后重试";
+      return "无法确认原生队列状态，请稍后重试或在原生客户端核对。";
     case "revert.usage":
       return threadRevertCommandUsageText;
     case "revert.unavailable":

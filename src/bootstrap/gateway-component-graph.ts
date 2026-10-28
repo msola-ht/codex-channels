@@ -84,7 +84,6 @@ import {
   toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
-  toUserMessageIdentity,
   type CodexTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
@@ -843,25 +842,6 @@ export abstract class GatewayComponentGraph {
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
       {
-        port: {
-          accountRateLimits: options => this.codex.accountRateLimits(options),
-          lunaReserveModel: () => this.codex.lunaReserveModel(),
-          updateLunaReserveThreadSettings: async (threadId, settings, beforeSubmit) => {
-            await this.codex.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);
-            if (this.stopping) throw new Error("Gateway 正在停止");
-            await this.inbound.drain();
-            if (this.stopping) throw new Error("Gateway 正在停止");
-          },
-        },
-        output: this.output,
-        onError: (error, threadId) => {
-          this.logger.warn(
-            { err: error, threadId },
-            "Luna Reserve 自动切换状态刷新失败",
-          );
-        },
-      },
-      {
         updateThreadApprovalsReviewer: (threadId, reviewer, beforeSubmit) =>
           this.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit),
       },
@@ -952,9 +932,6 @@ export abstract class GatewayComponentGraph {
       try {
         await this.trackQueueLifecycleTask(() => event.type === "turn.completed"
           ? service.releaseBackgroundIfComplete(threadId, {
-              // 0.148 deliberately keeps Queue entries after an interrupted turn;
-              // only normal/failed completion participates in native idle dispatch.
-              dispatchQueued: event.status !== "interrupted",
               isCurrent: () => !this.stopping && !this.isBindingRestoring(threadId),
             })
           : service.retryPendingBackgroundRelease(threadId, () => !this.stopping && !this.isBindingRestoring(threadId)));
@@ -1069,7 +1046,7 @@ export abstract class GatewayComponentGraph {
           canReleaseBinding: task => !this.isUnsupportedQqTarget(task),
           registerConstructionCleanup,
           releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
-            dispatchQueued: false, isCurrent,
+            isCurrent,
           }),
           router: this.router,
           codex: this.codex,
@@ -1529,7 +1506,6 @@ export abstract class GatewayComponentGraph {
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>
           this.conversations.releaseBackgroundIfComplete(threadId, {
-            dispatchQueued: false,
             isCurrent,
           })) === true,
       trackThreadActivity: (threadId) => this.core.trackThreadActivity(threadId),
@@ -1846,16 +1822,11 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
-        this.observeUserMessageIdentity(notification);
-        this.observeQueueChanged(notification);
         const threadStateEvent = toThreadStateEvent(notification);
         if (threadStateEvent) {
           const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
           if (isCurrent) this.notificationCurrent.set(notification, isCurrent);
           if (threadStateEvent.type === "thread.closed") this.core.observeThreadClosed(threadStateEvent.threadId);
-          if (threadStateEvent.type === "thread.settings.updated") {
-            this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
-          }
         }
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
@@ -2046,24 +2017,6 @@ export abstract class GatewayComponentGraph {
     }
   }
 
-  private observeUserMessageIdentity(notification: RpcNotification): void {
-    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
-    const identity = toUserMessageIdentity(notification);
-    if (!identity || notification.provider === undefined
-      || notification.provider !== this.codex.knownProvider(identity.threadId)) return;
-    const target = this.router.targetForThread(identity.threadId);
-    if (target) this.surfaceManager.forwardUserMessageIdentity(target, identity);
-  }
-
-  private observeQueueChanged(notification: RpcNotification): void {
-    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
-    const changed = toThreadQueueChangedEvent(notification);
-    if (!changed || notification.provider === undefined
-      || notification.provider !== this.codex.knownProvider(changed.threadId)) return;
-    const target = this.router.targetForThread(changed.threadId);
-    if (target) this.surfaceManager.forwardQueueChanged(target, changed.threadId);
-  }
-
   private outputOwner(event: OutputEvent): string {
     if (event.target.surface !== "qq") return JSON.stringify(this.outputIdentity(event));
     const source = this.outputSourcePort(event)?.capture(event) ?? null;
@@ -2245,7 +2198,6 @@ export abstract class GatewayComponentGraph {
       ["Channel File Spool", () => this.channelFileSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
-      ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
       // Keep synchronous durable admission alive until every accepted inbound
       // notification has been reduced. Closing Surface first loses this tail.

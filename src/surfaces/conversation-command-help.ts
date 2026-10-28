@@ -1,6 +1,6 @@
 import type { ConversationCommandName } from "../application/index.js";
 import { surfaceCommandAliases } from "./slash-command.js";
-import { conversationCommandCatalog, isConversationCommandVisible } from "./conversation-command-catalog.js";
+import { conversationCommandCatalog } from "./conversation-command-catalog.js";
 
 export { conversationCommandDescriptions } from "./conversation-command-catalog.js";
 
@@ -55,16 +55,14 @@ const helpSections = [
     lines: [
       line(command("status"), command("workspace", "[序号|ID|名称]")),
       { ...line(command("autoreview", "[on|off]")), description: "（当前会话后续轮次）" },
-      line(command("stop"), command("queue", "add <文本>"), command("queue", "list [页码]")),
-      line(command("queue", "update <完整 ID 或列表序号> <文本>"), command("queue", "delete <完整 ID 或列表序号>")),
-      line(command("queue", "reorder <完整 ID 或列表序号> <目标位置>"), command("queue", "start [完整 ID 或列表序号]")),
+      line(command("stop")),
       line(command("revert", "list [页码]"), command("revert", "<Turn ID 或列表序号>"), command("revert", "confirm <一次性令牌>")),
       line(command("review", "[branch <分支>|commit <SHA>|custom <说明>]")),
       line(command("diff")),
       line(command("release"), command("release", "force")),
       line(command("schedule", "list"), command("schedule", "runs <任务> [页码]")),
       line(command("schedule", "add <interval|once|monthly|daily|weekdays|weekly> ..."), command("schedule", "pause|resume|run|delete <任务>")),
-      line(command("plan", "[规划需求]"), command("goal", "[set <目标>|clear]")),
+      line(command("plan", "[规划需求]")),
     ],
   },
   {
@@ -109,9 +107,7 @@ export const conversationCommandHelpSections = helpSections.map((section) => ({
     if ("alias" in helpLine) {
       return [`/${helpLine.alias} → /${surfaceCommandAliases[helpLine.alias]}`];
     }
-    const visible = helpLine.commands.filter(usage => isConversationCommandVisible(usage.name));
-    if (visible.length === 0) return [];
-    const command = visible.map((usage) =>
+    const command = helpLine.commands.map((usage) =>
       `/${usage.alias ?? usage.name}${usage.argumentsText.length > 0 ? ` ${usage.argumentsText}` : ""}`,
     ).join(" · ");
     return [helpLine.description === undefined

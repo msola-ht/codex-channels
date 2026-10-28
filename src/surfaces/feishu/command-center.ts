@@ -40,7 +40,6 @@ const feishuLocalCommandActions = [
   "whoami",
   "feishu-status",
   "feishu-doctor",
-  "goal-set",
   "review-branch",
   "review-commit",
   "review-custom",
@@ -900,10 +899,6 @@ function commandCenterActionConsumesToken(
 ): boolean {
   return directStateChangingActions.has(action)
     || action === "thread-autoreview-select"
-    || (
-      action === "queue"
-      && /^(?:start|delete)\s+/u.test(input)
-    )
     || (
       action === "schedule"
       && /^(?:confirm|pause|resume|run|retry)\s+/u.test(input)
