@@ -403,10 +403,23 @@ export function renderCommandCenterChoices(
       title: `Gateway 计划任务 · 第 ${result.result.page}/${result.result.pageCount} 页`,
       description: result.result.totalTaskCount === 0
         ? "当前没有计划任务。"
-        : `共 ${result.result.totalTaskCount} 项；选择任务后可查看运行记录或执行管理操作。`,
+        : [
+            `共 ${result.result.totalTaskCount} 项`,
+            "",
+            ...result.result.tasks.flatMap((task, index) => [
+              `**${result.result.selectors[index] ?? "?"}. ${choiceCardLiteral(task.name, 32)}** · ${formatScheduledTaskStatusLabel(task.status)}`,
+              "",
+              `计划：${choiceCardLiteral(scheduleChoiceSummary(task.schedule))} · ${choiceCardLiteral(task.timezone, 80)}`,
+              "",
+              `下次运行：${formatScheduledAt(task.nextRunAt)}`,
+              "",
+            ]),
+            "选择任务查看详情和运行记录，再执行管理操作。",
+          ].join("\n"),
+      descriptionFormat: "lark_md",
       choices: [
-        ...result.result.tasks.map((task) => ({
-          label: `${formatScheduledTaskStatusLabel(task.status)} · ${task.name}`,
+        ...result.result.tasks.map((task, index) => ({
+          label: choiceButtonLabel(`${result.result.selectors[index] ?? "?"} · ${formatModelSettingLiteral(task.name)}`),
           action: "schedule" as const,
           input: `task ${task.taskId}`,
         })),
