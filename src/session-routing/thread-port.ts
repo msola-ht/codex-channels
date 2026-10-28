@@ -69,8 +69,15 @@ export interface ThreadSession {
     cwd: string;
     approvalPolicy: string;
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
-    permissions: string | null;
+    /** undefined means profile provenance was omitted or malformed; null is an explicit absence. */
+    permissions: string | null | undefined;
   };
+}
+
+/** Current permission facts only; never inferred from global configuration. */
+export interface ThreadPermissionContext {
+  sandbox: ThreadSession["effectiveSettings"]["sandbox"];
+  permissions: string | null;
 }
 
 export interface ThreadExecutionContext {

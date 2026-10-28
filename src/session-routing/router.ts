@@ -16,6 +16,7 @@ import type {
 import type {
   ThreadLifecyclePort,
   ThreadExecutionContext,
+  ThreadPermissionContext,
   ThreadSession,
   ThreadResumeSession,
   ThreadSnapshot,
@@ -102,7 +103,11 @@ export class SessionRouter {
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly namesByThread = new Map<string, string | null>();
-  private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources"> & { executionContext: ThreadExecutionContext | undefined }>();
+  private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources"> & {
+    executionContext: ThreadExecutionContext | undefined;
+    permissionContext: ThreadPermissionContext | undefined;
+  }>();
+  private readonly threadTitleBindings = new Map<string, { binding: ConversationBinding; key: object }>();
   private executionContextRevision = 0;
   private readonly executionContextChanges: (string | undefined | ((threadId: string) => boolean))[] = [];
   private subscriptionRevision = 0;
@@ -138,6 +143,39 @@ export class SessionRouter {
 
   current(target: ConversationTarget): ConversationBinding | undefined {
     return this.bindings.get(target);
+  }
+
+  /** A lifetime key survives foreground/background changes under the same owner only. */
+  captureThreadTitleBinding(threadId: string): { key: object; assertCurrent(): void } | undefined {
+    const binding = this.bindings.getByThread(threadId);
+    if (!binding || !this.isSubscriptionReady(threadId)) return undefined;
+    const workspace = this.workspaces.get(binding.workspaceId);
+    const context = this.executionContextForThread(threadId);
+    if (!workspace || context?.cwd !== workspace.cwd) return undefined;
+    const previous = this.threadTitleBindings.get(threadId);
+    const lifetime = previous && this.sameBinding(previous.binding, binding) ? previous : {
+      binding: { ...binding, target: { ...binding.target } }, key: {},
+    };
+    this.threadTitleBindings.set(threadId, lifetime);
+    const revision = this.executionContextRevision;
+    return { key: lifetime.key, assertCurrent: () => {
+      const changes = this.executionContextRevision - revision;
+      if (this.threadTitleBindings.get(threadId) !== lifetime
+        || !this.sameBinding(lifetime.binding, this.bindings.getByThread(threadId))
+        || this.workspaces.get(binding.workspaceId)?.cwd !== workspace.cwd
+        || !this.isSubscriptionReady(threadId)
+        || this.executionContextForThread(threadId)?.cwd !== workspace.cwd
+        || changes > this.executionContextChanges.length
+        || (changes > 0 && this.executionContextChanges.slice(-changes)
+          .some(change => typeof change === "function" ? change(threadId) : change === undefined || change === threadId))) {
+        throw new UserFacingError("thread.takeover.changed", "自动标题所属会话的绑定、目录或订阅已变化");
+      }
+    } };
+  }
+
+  /** External authorization cleanup must invalidate the removed binding even before a later rebind. */
+  invalidateThreadBindingLifetime(threadId: string): void {
+    this.threadTitleBindings.delete(threadId);
   }
 
   /** Authorize a bound Thread from a fresh read; diagnostic snapshots never grant access. */
@@ -368,6 +406,19 @@ export class SessionRouter {
     } };
   }
 
+  permissionContextForThread(threadId: string): ThreadPermissionContext | undefined {
+    if (!this.bindings.getByThread(threadId) || this.unsubscribedBindings.has(threadId)) return undefined;
+    const context = this.sessionDiagnosticsByThread.get(threadId)?.permissionContext;
+    return context && { ...context };
+  }
+
+  /** Consume only current-subscription settings; late notifications cannot revive lost facts. */
+  observeThreadPermissions(threadId: string, context: ThreadPermissionContext | undefined): void {
+    const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
+    if (!diagnostics?.executionContext || !this.bindings.getByThread(threadId) || this.unsubscribedBindings.has(threadId)) return;
+    diagnostics.permissionContext = context && { ...context };
+  }
+
   invalidateExecutionContext(threadId?: string): void {
     this.invalidateThreadContext(threadId, false);
   }
@@ -399,7 +450,10 @@ export class SessionRouter {
     }
     if (threadId === undefined) return; // A disconnect also invalidates unbound in-flight creations.
     const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
-    if (diagnostics) diagnostics.executionContext = undefined;
+    if (diagnostics) {
+      diagnostics.executionContext = undefined;
+      diagnostics.permissionContext = undefined;
+    }
     for (const resolution of this.approvalResolutions) {
       resolution.changedThreads.add(threadId);
       if (resolution.changedThreads.size > 1_024) {
@@ -447,6 +501,20 @@ export class SessionRouter {
     } };
   }
 
+  private sessionPermissionContext(session: ThreadSession): ThreadPermissionContext | undefined {
+    if (!this.isSessionContextCurrent(session)) return undefined;
+    const revision = this.sessionContextRevisions.get(session);
+    if (revision === undefined) return undefined;
+    const changes = this.settingsRevision - revision.settings;
+    // A newer notification owns current permission facts. Never replace it with a racing response.
+    if (changes > this.settingsChanges.length
+      || (changes > 0 && this.settingsChanges.slice(-changes).includes(session.thread.id))) {
+      return this.permissionContextForThread(session.thread.id);
+    }
+    const { sandbox, permissions } = session.effectiveSettings;
+    return permissions === undefined ? undefined : { sandbox, permissions };
+  }
+
   private isSessionContextCurrent(session: ThreadSession, subscriptionOnly = false): boolean {
     const revision = this.sessionContextRevisions.get(session);
     if (revision === undefined) return false;
@@ -478,6 +546,7 @@ export class SessionRouter {
       contextCompactionItemIds: session.contextCompactionItemIds,
       instructionSources: session.instructionSources,
       executionContext: this.sessionExecutionContext(session),
+      permissionContext: this.sessionPermissionContext(session),
     });
     this.unsubscribedBindings.delete(session.thread.id);
     this.unavailableResumeHistories.delete(session.thread.id);
@@ -1486,6 +1555,9 @@ export class SessionRouter {
   }
 
   private notifyBindingsChanged(): void {
+    for (const [threadId, lifetime] of this.threadTitleBindings) {
+      if (!this.sameBinding(lifetime.binding, this.bindings.getByThread(threadId))) this.threadTitleBindings.delete(threadId);
+    }
     for (const threadId of this.unavailableResumeHistories.keys()) {
       if (!this.bindings.getByThread(threadId)) this.unavailableResumeHistories.delete(threadId);
     }

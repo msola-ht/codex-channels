@@ -319,10 +319,12 @@ export class TelegramSurface {
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputBatcher(
-      (inputTarget, input, actorId) => service.submit(
+      (inputTarget, input, actorId, titleInput) => service.submit(
         inputTarget,
         input,
         () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+        undefined,
+        titleInput,
       ),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
@@ -1036,6 +1038,7 @@ export class TelegramSurface {
             context.message.text,
             telegramQuotedText(context.message.reply_to_message),
           ),
+          titleInput: { text: context.message.text, source: "task" },
         });
       } catch (error) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -1157,6 +1160,9 @@ export class TelegramSurface {
     const submitAttachment = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      "video",
+      undefined,
+      caption?.trim() ? { actorId, text: caption, source: "caption" } : undefined,
     );
     if (submitAttachment === undefined) {
       await context.reply("此 Gateway 的视频会话提交入口未就绪，请稍后重新发送。");
@@ -1275,6 +1281,7 @@ export class TelegramSurface {
         actorId: String(context.from?.id ?? ""),
         sequence,
         text,
+        ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
       });
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -1348,6 +1355,7 @@ export class TelegramSurface {
                   quotedText,
                 ),
               }),
+        ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
         localImages: [{
           path: image.path,
           mimeType: image.mimeType,
@@ -1397,6 +1405,8 @@ export class TelegramSurface {
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
       "audio",
+      undefined,
+      caption?.trim() ? { actorId, text: caption, source: "caption" } : undefined,
     );
     if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
     try {
@@ -1705,7 +1715,8 @@ export class TelegramSurface {
         ? "video" : undefined;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(inputTarget, allowed, kind,
-      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind));
+      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind, undefined,
+        message.caption?.trim() ? { actorId, text: message.caption, source: "caption" } : undefined));
     this.receivedAttachments.set(update, receipt);
     return () => { receipt.dispose(); this.receivedAttachments.delete(update); };
   }

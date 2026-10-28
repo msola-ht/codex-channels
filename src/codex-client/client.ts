@@ -41,6 +41,10 @@ import type {
   HookConfigPort,
   HookCatalog,
   HookAction,
+  GenerateThreadTitleRequest,
+  GenerateThreadTitleResult,
+  SetGeneratedThreadNameRequest,
+  SetGeneratedThreadNameResult,
 } from "../application/index.js";
 import type {
   ConsumeAccountRateLimitResetCreditParams,
@@ -154,6 +158,7 @@ import {
   toThreadRevertResult,
   toThreadTurnsPage,
 } from "./history-adapter.js";
+import { setThreadNameRpc, ThreadTitleRequests, type ThreadTitleDiagnostics } from "./thread-title.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -183,18 +188,24 @@ export class CodexAppServerClient implements
   private readonly fileChanges = new FileChangeApprovalContext();
   private readonly pendingSettingsUpdates = new Set<() => void>();
   private readonly observedTurns = new Map<string, ObservedTurnState>();
+  private readonly titleRequests: ThreadTitleRequests;
 
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
     imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch;
       readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute> },
+    private readonly onThreadTitleRecovery?: (previous: ThreadTitleDiagnostics, current: ThreadTitleDiagnostics) => void,
   ) {
-    this.rpc.onNotification(notification => this.fileChanges.observe(notification));
-    this.rpc.onNotification(notification => this.observeTurnState(notification));
+    this.titleRequests = new ThreadTitleRequests(rpc);
+    this.setServerRequestHandler(() => Promise.reject(new JsonRpcError(-32601, "Unsupported server request")));
+    this.rpc.onNotification(notification => this.titleRequests.observe(notification));
+    this.onNotification(notification => this.fileChanges.observe(notification));
+    this.onNotification(notification => this.observeTurnState(notification));
     this.rpc.onDisconnect(() => {
       this.fileChanges.clear();
       this.observedTurns.clear();
+      this.titleRequests.disconnected();
     });
     this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
       signal => this.rpc.request<GetAuthStatusResponse>({
@@ -203,18 +214,33 @@ export class CodexAppServerClient implements
       }, { retryOverload: false, signal }), imageUploadHttp.readProviderUploadRoute) : undefined;
   }
 
-  connect(): Promise<InitializeResponse> {
-    return this.rpc.connect();
+  async connect(): Promise<InitializeResponse> {
+    const initialized = await this.rpc.connect();
+    await this.recoverThreadTitles();
+    return initialized;
   }
 
-  reconnect(): Promise<InitializeResponse> {
+  async reconnect(): Promise<InitializeResponse> {
+    this.titleRequests.cancel();
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     this.observedTurns.clear();
-    return this.rpc.reconnect();
+    const initialized = await this.rpc.reconnect();
+    await this.recoverThreadTitles();
+    return initialized;
+  }
+
+  private async recoverThreadTitles(): Promise<void> {
+    const previous = this.titleRequests.diagnostics();
+    await this.titleRequests.recover(Date.now() + 5_000);
+    if (previous.quarantined) {
+      try { this.onThreadTitleRecovery?.(previous, this.titleRequests.diagnostics()); }
+      catch { /* A diagnostic failure cannot invalidate an established connection. */ }
+    }
   }
 
   close(): Promise<void> {
+    this.titleRequests.cancel();
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     this.observedTurns.clear();
@@ -223,7 +249,13 @@ export class CodexAppServerClient implements
   }
 
   onNotification(handler: (notification: RpcNotification) => void): () => void {
-    return this.rpc.onNotification(handler);
+    return this.rpc.onNotification(notification => {
+      const params = asRecord(notification.params);
+      const thread = asRecord(params?.thread);
+      const threadId = nonEmptyString(params?.threadId) ?? nonEmptyString(thread?.id);
+      if (notification.method === "thread/started" && thread?.ephemeral === true && thread.threadSource === "thread_title") return;
+      if (!threadId || !this.titleRequests.handlesThread(threadId)) handler(notification);
+    });
   }
 
   onDisconnect(handler: (error: Error) => void): () => void {
@@ -231,8 +263,25 @@ export class CodexAppServerClient implements
   }
 
   setServerRequestHandler(handler: ServerRequestHandler): void {
-    this.rpc.setServerRequestHandler(handler);
+    this.rpc.setServerRequestHandler(request => {
+      const params = asRecord(request.params);
+      const threadId = nonEmptyString(params?.threadId) ?? nonEmptyString(params?.conversationId);
+      return threadId && this.titleRequests.handlesThread(threadId)
+        ? Promise.resolve(this.titleRequests.rejectInteraction(request)) : handler(request);
+    });
   }
+
+  generateThreadTitle(request: GenerateThreadTitleRequest): Promise<GenerateThreadTitleResult> {
+    return this.titleRequests.generate(request);
+  }
+
+  setGeneratedThreadName(request: SetGeneratedThreadNameRequest): Promise<SetGeneratedThreadNameResult> {
+    return this.titleRequests.setName(request);
+  }
+
+  cancelThreadTitleRequests(): void { this.titleRequests.cancel(); }
+  waitForThreadTitleCleanup(deadlineMs: number): Promise<void> { return this.titleRequests.wait(deadlineMs); }
+  getThreadTitleDiagnostics(): ThreadTitleDiagnostics { return this.titleRequests.diagnostics(); }
 
   fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
     return this.fileChanges.get(request.threadId, request.turnId, request.itemId);
@@ -780,10 +829,7 @@ export class CodexAppServerClient implements
   }
 
   async setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void> {
-    await this.rpc.request({
-      method: "thread/name/set",
-      params: { threadId, name },
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    await setThreadNameRpc(this.rpc, threadId, name, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean> {

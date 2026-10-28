@@ -39,7 +39,7 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
 ## 受控协议边界
 修改实验能力、动态工具、图片引用或 Plugin 接入时读取本节；以下约束不因资料移位而放宽。
 
-- 稳定业务代码不得依赖未经批准的实验生成字段。当前锁定 `codex-cli 0.164.0` 只允许六类
+- 稳定业务代码不得依赖未经批准的实验生成字段。当前锁定 `codex-cli 0.164.0` 只允许七类
   受控协议例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`。这些字段必须通过
   `--experimental` 生成类型并从 `codex-protocol` 受控导出。原生 Thread Queue 只允许使用
@@ -55,6 +55,17 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
   请求解决、Thread 失效、断线和关闭撤销未完成操作，写入及派发前复核，已提交操作不自动回滚。
   创建和删除仍须用户确认；后台计划任务 Thread 不注册工具并拒绝递归调用。
   不向已有 Thread 注入工具，不接入 `additionalContext`、任意动态工具或其他命名空间。
+  自动标题临时请求仅允许 `thread/start` 的 `runtimeWorkspaceRoots`、`environments`、
+  `selectedCapabilityRoots`、`dynamicTools` 显式空数组与 `permissions` 的原 Profile 继承，
+  以及稳定 `ephemeral`、`threadSource="thread_title"`、`turn/start.outputSchema`。
+  `ThreadStartParams` 受控导出只用于锁定上游 `temporary_structured_request.rs` 的完整隔离配置，
+  不开放任意临时请求。Client 从目标 cwd 的 `config/read` 禁用全部 MCP 与上游列出的工具及扩展；
+  当前模型目录决定合法 effort，响应必须确认实际 cwd、model、modelProvider 与权限。
+  现有 experimental 协商同时开放的命令、文件、权限、用户输入、MCP elicitation、动态工具及旧式
+  approval Server Request 在临时 Thread 内一律安全拒绝并取消生成；未知请求返回明确错误。
+  账户刷新、attestation、currentTime 不因此新增支持，仍遵守既有拒绝边界。
+  临时通知不进入普通 Core/Surface；取消、超时及断线保留清理未确认与 Provider 命名隔离。
+  实现入口为 `codex-client/thread-title.ts`；真实模型兼容性及实际服务清理尚待分别验收。
   图片引用上传只允许额外读取 `account/read.workspaceRouting`，用于核对当前 ChatGPT 账户、
   后端与路由约束；通过官方 `getAuthStatus` 获取当前可导出的令牌，不读取磁盘凭据。
   该字段必须使用受控生成类型，不得用于其他账户或路由功能。
@@ -105,8 +116,8 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
 | 87 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 69 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
-| 40 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
+| 70 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 40 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts)、[`thread-title.ts`](../src/codex-client/thread-title.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
 | 18 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
@@ -389,6 +400,7 @@ Remote 沿用工作区或显式审批参数，恢复与继承式分叉保留历�
 | Codex Auto-review 用户偏好 | 稳定 `config/read`、`configRequirements/read`、`config/batchWrite`；受控实验 `configRequirements/read.allowedApprovalsReviewers` | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs) 投影并单独写入用户层 `approvals_reviewer = "user"` 或 `"auto_review"`；[`client.ts`](../src/codex-client/client.ts) 只在该设置读取时检查受管 requirements。CLI 与 WebUI 显式确认并校验用户层修订；未知现值、受管限制和不可用的策略读取失败关闭。审查生命周期通知及统计通过下表独立的状态投影链路处理。 |
 | Thread 实际审批方式展示 | `thread/start`、`thread/resume`、`thread/fork` 响应及 `thread/settings/updated.threadSettings` 的稳定 `approvalsReviewer` 字段 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 与 [`notification-thread-state.ts`](../src/codex-client/notification-thread-state.ts) 映射实际值，经 [`router.ts`](../src/session-routing/router.ts) 与 [`core.ts`](../src/conversation-core/core.ts) 传给 [`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) 的启动、完成卡和 [`conversation-workspace-status-command-format.ts`](../src/surfaces/conversation-workspace-status-command-format.ts) 的 `/status`；缺失或未知值显示未知，不从全局开关推断。 |
 | 当前 Thread 审批方式切换 | 稳定 `thread/settings/update.approvalsReviewer` 与 `thread/settings/updated.threadSettings.approvalsReviewer`，受控 `ThreadSettingsUpdateParams` / `ThreadSettingsUpdateResponse` | [`turn-port.ts`](../src/application/turn-port.ts) 的审批设置窄端口、[`conversation-service.ts`](../src/application/conversation-service.ts) 与 [`client.ts`](../src/codex-client/client.ts) 实现 `/autoreview [on\|off]`：查询不创建 Thread，写入核对当前绑定、空闲状态与待处理交互，只有 `user` / `auto_review` 可写，其他实际值只读。相同已确认值直接返回；变更不启动 Turn、不改 Workspace 默认、不重试，先注册通知观察再请求，同时确认 RPC 成功与最新同 Thread 同目标合法通知；超时、断线、关闭及 Thread 失效清理等待，结果未确认单独回报，不乐观改缓存。Provider 路由保持对应实例隔离。上游依据为锁定源码 `request_processors/turn_processor.rs::thread_settings_update_inner`、`bespoke_event_handling.rs::ThreadSettingsApplied` 与 `tests/suite/v2/thread_settings_update.rs` / `model_auto_review.rs` |
+| 渠道自动标题 | 稳定 `item/completed.userMessage`、`thread/read`、`config/read`、`model/list`、`thread/start`、`turn/start.outputSchema`、`turn/interrupt`、`thread/unsubscribe`、`thread/name/set` 与名称通知；标题隔离受控字段见上文 | [`thread-title.ts`](../src/codex-client/thread-title.ts) 封装临时 Thread 的完整工具隔离、完成输入身份摘要、严格标题解析、分阶段期限、意外交互安全拒绝与跨重连清理隔离；[`thread-title-service.ts`](../src/application/thread-title-service.ts) 只处理已授权提交与实际完成用户 Item 的精确关联。隔离 App Server 与回环受控 Responses 输出已观察到普通输入完成、临时生成及权威名称回写；非法 JSON、重复字段、正文超限和 Unicode 截断已有本地观察。尚未验收真实 Provider 的 schema 兼容性、真实模型质量和三平台服务故障恢复，不声明跨客户端条件写或跨进程零残留。 |
 | 恢复协作模式 | `thread/resume.collaborationMode`（稳定响应字段） | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 将实际 Default/Plan 模式交给 [`router.ts`](../src/session-routing/router.ts)，用于显式恢复与已有绑定的订阅恢复；无绑定时始终新建 Thread |
 | 异步用户问题 | `item/started`、`item/completed` 的 `agentMessage.delivery` / `questions`；回答复用 `turn/steer`、`turn/start` | [`async-question-coordinator.ts`](../src/bootstrap/async-question-coordinator.ts) 复用四个 Surface 的输入交互，独立于阻塞审批；[`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内验证原 Thread 和有效期。QQ 通过最终回答来信及原 `SubmissionObserver` 为该次提交建立新来源，后续正文沿共享投递回传；本批 QQ 路径已部署，部分分支待实机验收 |
 | 文件审批明细关联 | `item/started.fileChange.changes` 与 `item/fileChange/requestApproval` 的 Thread、Turn、Item 身份 | [`file-change-approval-context.ts`](../src/codex-client/file-change-approval-context.ts) 在每个 Client 内有界保留路径与操作，Provider 路由核对请求来源；[`coordinator.ts`](../src/approval/coordinator.ts) 为四个渠道生成完整转义详情，明细缺失显式提示，无效或过长预览拒绝；不缓存 Diff。官方顺序见固定版本 [`turn_start.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/turn_start.rs) 的 `turn_start_file_change_approval_v2` |

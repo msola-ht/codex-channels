@@ -132,10 +132,12 @@ export class WeixinConversationAdapter {
     private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
     this.inputs = new SurfaceInputBatcher(
-      (target, input, actorId) => conversations.submit(
+      (target, input, actorId, titleInput) => conversations.submit(
         target,
         input,
         () => !this.closed && this.inputOptions.isAllowed?.(target, actorId) === true,
+        undefined,
+        titleInput,
       ),
       inputOptions,
     );
@@ -158,7 +160,9 @@ export class WeixinConversationAdapter {
       if (message.kind === "video" || (message.kind === "file" && /\.(?:mp4|webm)$/iu.test(message.file.fileName))) {
         if (!this.videos) throw new UserFacingError("video.unavailable", "微信视频附件输入未启用");
         const submit = await receipt?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(message.target,
-          () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true);
+          () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
+          "video", undefined,
+          message.text?.trim() ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined);
         if (!submit) throw new UserFacingError("video.unavailable", "视频附件会话授权入口不可用");
         const videoSignal = AbortSignal.any([submit.signal, ...(signal ? [signal] : [])]);
         let file;
@@ -200,6 +204,10 @@ export class WeixinConversationAdapter {
           message.target,
           () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
           "audio",
+          undefined,
+          message.audio.transcript?.trim()
+            ? { actorId: message.actorId, text: message.audio.transcript, source: "transcription" }
+            : undefined,
         );
         if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
         const audioSignal = AbortSignal.any([scope.signal, ...(signal ? [signal] : [])]);
@@ -213,6 +221,7 @@ export class WeixinConversationAdapter {
                 message.audio.transcript,
                 message.quotedText,
               ),
+              { actorId: message.actorId, text: message.audio.transcript, source: "transcription" },
             );
             return;
           }
@@ -279,6 +288,7 @@ export class WeixinConversationAdapter {
           actorId: message.actorId,
           sequence,
           text: fileText,
+          ...(message.text?.trim() ? { titleInput: { text: message.text, source: "caption" as const } } : {}),
         });
         if (result.tail && result.submission.steered) {
           this.notify(
@@ -333,6 +343,7 @@ export class WeixinConversationAdapter {
                 ),
               }),
           localImages,
+          ...(message.text?.trim() ? { titleInput: { text: message.text, source: "caption" as const } } : {}),
         });
         if (result.tail && result.submission.steered) {
           this.notify(
@@ -349,6 +360,8 @@ export class WeixinConversationAdapter {
           formatQuotedInput(message.text, message.quotedText),
           () => !this.closed && !signal?.aborted
             && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
+          undefined,
+          { actorId: message.actorId, text: message.text, source: "task" },
         );
         return;
       }

@@ -66,3 +66,4 @@ export {
   type WindowsProxyTransportOptions,
 } from "./windows-proxy-transport.js";
 export { toReasoningGuardInput } from "./notification-reasoning-guard.js";
+export { toCompletedThreadTitleInput, parseThreadTitle, type ThreadTitleDiagnostics } from "./thread-title.js";

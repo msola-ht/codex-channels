@@ -107,6 +107,8 @@ import {
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
+import type { ThreadTitleService } from "./thread-title-service.js";
+import type { TitleInputContext, SetGeneratedThreadNameRequest, SetGeneratedThreadNameResult, ThreadTitlePort } from "./thread-title-port.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
 export interface Submission {
@@ -218,21 +220,21 @@ export interface PreparedAttachmentSubmission {
   readonly signal: AbortSignal;
   readonly mayHaveSubmitted: boolean;
   captureTarget(): void;
-  submit(value: string | ConversationInput): Promise<Submission>;
+  submit(value: string | ConversationInput, titleInput?: TitleInputContext): Promise<Submission>;
   dispose(): void;
 }
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image" | "file", observer?: SubmissionObserver): PreparedAttachmentSubmission;
-  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission>;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image" | "file", observer?: SubmissionObserver, titleInput?: TitleInputContext): PreparedAttachmentSubmission;
+  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver, titleInput?: TitleInputContext): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
   compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
   fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation, titleInput?: TitleInputContext): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
 }
 
@@ -245,6 +247,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { skillName: string }>;
   invokePlugin(
     target: ConversationTarget,
@@ -252,6 +255,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
@@ -260,6 +264,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { roleName: string }>;
   modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
@@ -376,6 +381,23 @@ export class ConversationService implements
   private idleReleaseEnabled = true;
   private idleReleaseGeneration = 0;
   private readonly sessionQueries: ConversationSessionQueryService;
+  private threadTitles: ThreadTitleService | undefined;
+
+  setThreadTitleService(service: ThreadTitleService): void { this.threadTitles = service; }
+
+  async writeGeneratedThreadName(target: ConversationTarget, request: SetGeneratedThreadNameRequest,
+    port: ThreadTitlePort): Promise<SetGeneratedThreadNameResult> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.locked(target, () => { request.beforeSubmit(); return port.setGeneratedThreadName(request); }),
+        new Promise<SetGeneratedThreadNameResult>(resolve => {
+          timer = setTimeout(() => resolve({ type: "unconfirmed" }), Math.max(0, request.deadlineMs - Date.now()));
+          timer.unref();
+        }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -554,10 +576,10 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query, assertAuthorized);
   }
 
-  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission> {
+  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver, titleInput?: TitleInputContext): Promise<Submission> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
     try {
-      return await this.submitObserved(target, value, isAllowed, observation);
+      return await this.submitObserved(target, value, isAllowed, observation, titleInput);
     } finally {
       observation?.settle();
     }
@@ -568,6 +590,7 @@ export class ConversationService implements
     value: string | ConversationInput,
     isAllowed?: () => boolean,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     let input: TurnInput[];
     try {
@@ -590,7 +613,7 @@ export class ConversationService implements
     assertAllowed();
     return this.locked(target, () => {
       assertAllowed();
-      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed, observation);
+      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed, observation, undefined, titleInput);
     });
   }
 
@@ -599,7 +622,7 @@ export class ConversationService implements
     this.extensionQueries.closeMcpLogins();
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" | "file" = "video", observer?: SubmissionObserver): PreparedAttachmentSubmission {
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" | "file" = "video", observer?: SubmissionObserver, titleInput?: TitleInputContext): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     const unavailable = (message: string) => new UserFacingError(kind === "image" ? "image.download-failed"
@@ -645,7 +668,7 @@ export class ConversationService implements
           threadId: this.router.current(target)?.threadId,
           selectionScope: fixesModelSelection ? this.models.status(target).selectionScope : undefined };
       },
-      submit: async (value) => {
+      submit: async (value, submittedTitleInput) => {
         // One prepared scope owns one observer lifecycle. A repeated call must
         // not settle the same external observer again and revoke prior output.
         if (used) throw unavailable("附件提交入口已使用");
@@ -690,7 +713,7 @@ export class ConversationService implements
                 if (fixesModelSelection) snapshot.selectionScope = this.models.status(target).selectionScope;
               }
               assertCurrent();
-            });
+            }, submittedTitleInput ?? titleInput);
           });
         } finally {
           observation?.settle();
@@ -705,6 +728,7 @@ export class ConversationService implements
     text: string,
     isCurrent: () => boolean,
     observer?: SubmissionObserver,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
     try {
@@ -719,7 +743,7 @@ export class ConversationService implements
         if (input.length === 0) {
           throw new UserFacingError("message.empty", "回答不能为空");
         }
-        return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent, observation);
+        return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent, observation, undefined, titleInput);
       });
     } finally {
       observation?.settle();
@@ -732,6 +756,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { skillName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -769,7 +794,7 @@ export class ConversationService implements
           path: skill.path,
         },
       ], { kind: "skill", name: skill.name },
-      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation);
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation, undefined, titleInput);
       return { ...submission, skillName: skill.name };
     });
   }
@@ -780,6 +805,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { pluginName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -827,7 +853,7 @@ export class ConversationService implements
       threadId => {
         this.commandThreadGuard(target, threadId, assertAuthorized)();
         requirePluginProvider();
-      }, assertAuthorized, observation);
+      }, assertAuthorized, observation, undefined, titleInput);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -864,6 +890,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { roleName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -886,7 +913,7 @@ export class ConversationService implements
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ], { kind: "agent", name: role.name }, assertAuthorized, observation);
+    ], { kind: "agent", name: role.name }, assertAuthorized, observation, titleInput);
     return { ...submission, roleName: role.name };
   }
 
@@ -896,13 +923,14 @@ export class ConversationService implements
     identity?: TurnStartIdentity,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     this.touchActivity(target);
     return this.authorizedLocked(
       target,
       assertAuthorized,
       () => this.submitInputLocked(target, input, identity,
-        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation),
+        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation, undefined, titleInput),
     );
   }
 
@@ -914,6 +942,7 @@ export class ConversationService implements
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
     onThreadPrepared?: (threadId: string) => void,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     assertAuthorized?.();
     this.touchActivity(target);
@@ -933,7 +962,11 @@ export class ConversationService implements
       try {
         observation?.prepare({ threadId: active.threadId, kind: "steer", expectedTurnId: active.turnId, clientUserMessageId });
         const result = await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
-          beforeSubmit, observation ? () => observation.attempt() : undefined);
+          beforeSubmit, () => {
+            observation?.attempt();
+            this.threadTitles?.attempted(target, active.threadId, clientUserMessageId, input, titleInput);
+            return undefined;
+          });
         if (result.turnId !== active.turnId) throw new Error("追加输入响应与预期 Turn 不一致");
         observation?.confirm({ threadId: active.threadId, turnId: result.turnId, steered: true });
       } catch (error) {
@@ -942,7 +975,7 @@ export class ConversationService implements
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation, onThreadPrepared);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation, onThreadPrepared, titleInput);
   }
 
   revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
@@ -1371,7 +1404,11 @@ export class ConversationService implements
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      await this.codex.setThreadName(binding.threadId, normalized, this.commandThreadGuard(target, binding.threadId, assertAuthorized, true));
+      const guard = this.commandThreadGuard(target, binding.threadId, assertAuthorized, true);
+      await this.codex.setThreadName(binding.threadId, normalized, () => {
+        guard();
+        this.threadTitles?.cancelThread(binding.threadId);
+      });
     });
   }
 
@@ -1414,7 +1451,7 @@ export class ConversationService implements
     return this.withGuardedSelection(target, (guard) => this.requireCollaborationModes().toggle(target, guard), assertAuthorized);
   }
 
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission> {
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation, titleInput?: TitleInputContext): Promise<Submission> {
     const normalized = prompt.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
@@ -1438,6 +1475,8 @@ export class ConversationService implements
         undefined,
         assertAuthorized,
         observation,
+        undefined,
+        titleInput,
       );
     });
   }
@@ -1736,6 +1775,7 @@ export class ConversationService implements
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
     onThreadPrepared?: (threadId: string) => void,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     this.touchActivity(target);
     const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
@@ -1778,7 +1818,11 @@ export class ConversationService implements
           clientUserMessageId,
           workspace.cwd,
           { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); },
-            ...(observation ? { requestAttempted: () => observation.attempt() } : {}) },
+            requestAttempted: () => {
+              observation?.attempt();
+              this.threadTitles?.attempted(target, binding.threadId, clientUserMessageId, input, titleInput);
+              return undefined;
+            } },
         );
       } catch (error) {
         this.recordTurnError("start", target, binding.threadId, null, error);

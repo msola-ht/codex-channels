@@ -226,3 +226,7 @@ export { OpenAiResetCreditService, ResetCreditError, type OpenAiResetCredit, typ
 export { ConversationResetCreditService, resetCreditCommandUsage, type ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 export { ReasoningRepeatGuard, type ReasoningGuardInput } from "./reasoning-repeat-guard.js";
 export { calculateCloudUsageEstimates, type CloudUsageEstimates, type CloudUsageView } from "./cloud-usage-estimates.js";
+export { threadTitleInputDigest, type TitleInputContext, type CompletedThreadTitleInput,
+  type GenerateThreadTitleRequest, type GenerateThreadTitleResult, type SetGeneratedThreadNameRequest,
+  type SetGeneratedThreadNameResult, type ThreadTitlePort } from "./thread-title-port.js";
+export { ThreadTitleService, type ThreadTitleAuthorization } from "./thread-title-service.js";

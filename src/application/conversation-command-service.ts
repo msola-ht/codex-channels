@@ -712,6 +712,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.task,
           assertAuthorized,
           observation,
+          { actorId, text: invocation.task, source: "task" },
         );
         return {
           kind: "outcome",
@@ -737,6 +738,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.task,
           assertAuthorized,
           observation,
+          { actorId, text: invocation.task, source: "task" },
         );
         return {
           kind: "outcome",
@@ -751,7 +753,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized, observation);
+        return this.executePluginCommand(target, argumentsText, actorId, assertAuthorized, observation);
       case "usage":
         return {
           kind: "usage",
@@ -795,7 +797,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation,
+            { actorId, text: argumentsText, source: "task" });
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -919,6 +922,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executePluginCommand(
     target: ConversationTarget,
     input: string,
+    actorId: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
   ): Promise<ConversationCommandResult> {
@@ -945,6 +949,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       operation.task,
       assertAuthorized,
       observation,
+      { actorId, text: operation.task, source: "task" },
     );
     return {
       kind: "outcome",

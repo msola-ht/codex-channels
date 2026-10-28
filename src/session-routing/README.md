@@ -32,6 +32,13 @@
 响应的 roots 加载快照（含该快照 cwd）。设置通知只更新 cwd，不伪造实时 roots；目录变化
 使已开始的审批归属查询失效。断线、关闭、待恢复及解绑后不展示旧上下文，成功恢复后重建。
 未知上下文不由迟到通知复活。此投影不改变精确目录准入、执行请求或 Workspace 权限。
+`permissionContextForThread` 单独提供当前确认的 sandbox 与 Permission Profile 身份；
+`undefined` 表示未知，`permissions:null` 只来自官方明确空值，内置和自定义 ID 均保留原值。
+启动、恢复、分叉响应及同步设置通知共同维护这份内存事实；缺字段不推断为空，订阅失效、
+断线、关闭及解绑后隐藏旧值，竞争中的生命周期响应不覆盖更新的设置事实。
+`captureThreadTitleBinding` 为自动标题提供连续绑定的稳定 key 与提交守卫：同归属前后台切换
+保留 key，解绑、接管或重绑失效，目录和订阅变化阻止旧任务继续。外部撤权直接删除 BindingStore
+绑定时须同时调用 `invalidateThreadBindingLifetime`，不能让同一 Thread 的后续恢复复活旧授权。
 `prepareThreadWorkspaceGuard` 为输入和 Queue 提交单独读取权威 Thread，核对绑定、来源、精确目录与订阅；
 返回的提交回调利用有界变化记录拒绝读取或异步准备期间的目录变化、断线和订阅失效。
 后台绑定允许既有 automation 来源，且提交前复核前后台身份，前台仍只接受普通会话来源。

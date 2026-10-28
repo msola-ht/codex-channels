@@ -13,6 +13,7 @@ export {
   type ThreadQueryOptions,
   type ThreadSession,
   type ThreadExecutionContext,
+  type ThreadPermissionContext,
   type ThreadResumeSession,
   type ThreadStartOptions,
   type ThreadSnapshot,

@@ -1,6 +1,7 @@
 import type {
   ConversationInput,
   Submission,
+  TitleInputContext,
 } from "../application/index.js";
 import {
   UserFacingError,
@@ -22,6 +23,7 @@ export interface SurfaceInputPart {
   actorId: string;
   sequence: number;
   text?: string;
+  titleInput?: Omit<TitleInputContext, "actorId">;
   localImages?: ReadonlyArray<{
     path: string;
     mimeType: InputImageMimeType;
@@ -48,6 +50,7 @@ type SubmitConversationInput = (
   target: ConversationTarget,
   input: string | ConversationInput,
   actorId: string,
+  titleInput?: TitleInputContext,
 ) => Promise<Submission>;
 
 interface PendingPart extends SurfaceInputPart {
@@ -261,7 +264,14 @@ export class SurfaceInputBatcher {
             text,
             images: images.map(({ url }) => ({ url })),
           };
-      const submission = await this.submit(batch.target, value, parts[0]!.actorId);
+      const firstTitleInput = parts.find((part) => part.titleInput?.text.trim())?.titleInput;
+      const titleInput = firstTitleInput === undefined ? undefined : {
+        actorId: parts[0]!.actorId,
+        text: parts.flatMap((part) => part.titleInput?.source === firstTitleInput.source
+          ? [part.titleInput.text] : []).join("\n"),
+        source: firstTitleInput.source,
+      };
+      const submission = await this.submit(batch.target, value, parts[0]!.actorId, titleInput);
       parts.forEach((part, index) => {
         part.resolve({
           submission,

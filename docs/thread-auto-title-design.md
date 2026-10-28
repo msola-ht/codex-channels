@@ -1,12 +1,12 @@
-# 会话自动命名待实施方案
+# 会话自动命名设计与验收记录
 
-状态：Draft，业务代码尚未实施。范围为 Gateway 经 App Server 为已授权渠道会话生成名称。
+状态：已部署并重启 Gateway，线上一次自动命名已确认；其他 Provider、渠道与服务故障恢复仍待验收。范围为 Gateway 经 App Server 为已授权渠道会话生成名称。
 不修改上游源码，不为未绑定历史批量命名，不接管原生 TUI 或 Desktop 发起的输入。
 
-当前修订基线为本仓库 `7f89a1dfc2fbd49010cb6b1f31168fe9149e87f9`，分支
+设计修订基线为本仓库 `7f89a1dfc2fbd49010cb6b1f31168fe9149e87f9`，实现基于方案提交 `4ac5fc7c` 后的工作区，分支
 `feat/thread-auto-title-design`；上游为 Codex `0.164.0`、提交
-`6aaac694803004a63c6f393d153c96d22521a6b9`。以下方案尚不构成本项目已支持能力，
-也不表示正在运行的服务采用该版本。
+`6aaac694803004a63c6f393d153c96d22521a6b9`。本页保留设计合同与开放验收；用户行为见
+[用户指南](user-guide.md#会话自动命名)，本次部署范围与线上证据见下文。
 
 ## 结论与职责
 
@@ -238,10 +238,10 @@ Actor 撤权路径。已有 60 秒 RPC 默认期限不能直接叠加进 Gateway
 
 | 模块或文件 | 必要改动 |
 | --- | --- |
-| `src/application/thread-title-port.ts`、`thread-title-service.ts`（拟新增）及公开 index | 稳定窄端口、授权提交登记、有界任务与最终回写策略 |
+| `src/application/thread-title-port.ts`、`thread-title-service.ts` 及公开 index | 稳定窄端口、授权提交登记、有界任务与最终回写策略 |
 | Surface 输入、命令执行及异步回答的共享提交上下文 | 传递精确 Actor 和原始用户任务候选；在最终提交授权边界交接独立命名授权，不以一次性票据充当持续权限 |
 | `src/application/conversation-service.ts` | 共享 start/steer 登记与失效清理；手工命名取消；不替换现有提交观察器，不恢复 Queue 写入能力 |
-| `src/codex-client/thread-title.ts`（拟新增）、`client.ts` 及公开 index | 官方通知完成投影、固定临时配置、schema、校验、结果收集、安全拒绝与资源回收 |
+| `src/codex-client/thread-title.ts`、`client.ts` 及公开 index | 官方通知完成投影、固定临时配置、schema、校验、结果收集、安全拒绝与资源回收 |
 | `src/codex-client/provider-routing-client.ts`、`json-rpc.ts` | 原 Thread 选路、实际 Provider 身份校验、贯穿任务的 activity、命名单次请求期限、跨普通重连保留清理责任与隔离诊断；明确超时后不接收迟到响应 |
 | `src/session-routing/router.ts`、Thread 稳定执行上下文及设置通知投影 | 生命周期与同步设置通知共同维护当前 profile/sandbox，失效与迟到保护；提供同原 Thread 的守卫，不建立新绑定 |
 | `src/bootstrap/gateway-component-graph.ts` | 注入授权、生命周期及运行时已确认的 Server 实例身份供隔离诊断，无法确认则显式未知；当前连接的通知准入、名称同步失效、绑定变化、停止顺序 |
@@ -257,7 +257,59 @@ Actor 撤权路径。已有 60 秒 RPC 默认期限不能直接叠加进 Gateway
 微信保持现有投递白名单，经列表及名称事实归约之后新产生的完成展示消费名称，不追溯改写
 已发消息。标题晚于最后一次完成时，微信需要查询列表才能看见；本轮不扩大其主动通知范围。
 
-## 实施后的观察计划
+## 观察计划与实际证据
+
+2026-10-28 已观察以下边界，使用独立临时 Home、安装的 Codex CLI `0.164.0` 和自有 stdio
+App Server，不访问真实账户，不发送平台消息，不重启共享服务：
+
+- 实际 `Router.ensure → thread/start` 返回 `:read-only`；同所有者转后台后授权 key 不变且旧守卫
+  仍有效。真实 `thread/settings/update` 切到 `:workspace`，等待官方通知后权限投影为
+  `workspace-write`。取消订阅后投影未知、旧守卫拒绝；缺失 profile 不冒充 null，迟到设置不复活。
+- `Application.submit → 实际 completed 用户 Item → 自动命名 → thread/name/set → thread/read/list`
+  已跑通，原 Thread 的读取与列表名称均为“整理发布说明”，结算 `applied`。本地 HTTP 共两次请求，
+  普通 Core 未收到标题 JSON，Client 诊断为未隔离、活动零、未确认清理零；随后手工改名读回“手工名称”。
+  此路径的模型端是只监听 `127.0.0.1` 的受控 Responses 返回，证明协议与应用编排，不能证明真实
+  模型的标题质量、Provider schema 兼容性或平台投递。任务进程已关闭，临时 Home 已删除。
+- 解析人工挑战：重复 title 键、额外字段、非 JSON 围栏、空标题与超 8 KiB 正文均拒绝；40 个
+  emoji 按码点截为 36。摘要保留文本分段边界，started 和旧连接通知不触发；全角尾标点沿锁定
+  上游规则保留，只清理其定义的 `.?!`。
+- 协调器人工挑战（内存端口）：摘要不匹配、缺少来源时模型调用零、写入零；同 Item 重复通知
+  仅启动一次生成，期间手工名称到达后迟到生成结果结算 `cancelled`、写入零；撤权后新登记也不
+  增加模型调用或写入。此项覆盖本地取消编排，不等于真实平台交互并发已验收。
+
+集成只读复查发现并修正两处边界：Provider 标题调用只使用已连接实例，不通过可能等待普通
+60 秒 Hook 刷新的连接准备路径；同步设置归约前检查当前连接，旧设置不能覆盖新连接权限与模型。
+以上修订由主代理核对实际源码；该轮集成复查范围有限。随后按用户要求，由 Astra 独立进行
+四渠道输入到授权登记、完成事件、临时隔离、取消清理、名称写入与显示消费的全链路关联审查，
+包含撤权、旧连接、重复事件、非法输出、超时和未知资源等反例。
+
+本次全链路审查确认一处 P2：临时 Turn 已结束但退订失败时，普通重连没有补偿；若其他订阅者
+保留 runtime、没有 `thread/closed`，该 Provider 会持续禁用自动命名。已增加连接握手后的
+五秒总预算恢复，只补偿有精确终态证据的资源，保持未知资源隔离；Astra 已复核该修复源码。
+主代理另补 `thread_title.recovery` 前后诊断，覆盖主实例、受管、自定义和聚合 Provider。
+
+本轮新增实际观察：固定自定义主 Provider 的 `openai → title-local` 路由，经真实 App Server
+与受控 localhost Responses 端跑通 `Application.submit → applied → thread/read`，名称为
+“整理发布说明”，模型端两次请求均无工具，activity 回到零，普通 Core 未收到标题 JSON。
+恢复分支使用内存故障注入直接调用 `Client.connect`：已结束资源恰好补做一次退订并解除隔离；
+终态未知、身份未知均不发退订且保留隔离；退订再次失败保留隔离；诊断回调抛错不影响连接成功。
+这些观察未创建测试文件，不等于真实断网恢复。真实 Unix Socket 重连演练在启动时被上游拒绝：
+环境固定目录 `/tmp/codex-daemon-0` 权限为 `000`，上游要求 `0700`；未改动共享目录，
+该边界仍待可用隔离环境补证。该轮隔离观察不覆盖真实 Provider、四平台往返和三平台服务恢复。
+
+2026-10-28 后续部署当前工作树：`npm run install:global` 成功，四个标题关键构建文件与全局
+安装产物 SHA-256 一致；`codexc restart gateway` 完成就绪检查。Gateway 主 PID 从
+3863933 变为 3890943，App Server 主 PID 3863826 与启动时间保持不变，Relay、WebUI 也未重启。
+用户随后确认收到“Session 名称已更新：明确命名的适用情况”；同一运行实例日志记录
+`thread_title.result`、`provider=openai`、`outcome=applied`。这是一次线上生成、官方名称写入与
+用户可见通知的证据，不扩展为所有 Provider 或四渠道完整验收，也不据此推断模型质量稳定。
+提交前关联复核复用此前 Astra 全链路审查，并核对授权登记、输入来源、Provider 选路、绑定失效、
+旧连接通知、恢复与回写链路，未确认新的代码缺陷；本轮更新部署与验收状态，保留故障恢复开放项。
+
+当前实现保守保留未确认资源；重连后的 ephemeral 元数据不提供精确 Turn 终态证据，不凭
+`idle` 或“资源不存在”解除隔离。已知同 Turn 终态与订阅释放，或官方对应 runtime 关闭通知，
+才可结算已知资源。Server 实例身份在当前接线中明确记为未知，人工恢复仍须自行保存监管器或
+进程生命周期证据。每 Client 最多保留 2,000 个临时身份，满后跳过新命名，不淘汰身份放行迟到通知。
 
 不新增或修改测试文件、fixtures、守卫或探针脚本。按实际改动运行既有类型、模块边界、lint
 与文档检查；这些只记录工作流状态。使用隔离数据和既有入口进行下列人工挑战，记录实际输出。

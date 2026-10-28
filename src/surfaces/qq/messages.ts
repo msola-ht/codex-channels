@@ -861,7 +861,8 @@ export class QqMessages implements SurfaceOutputPort {
         if (media) {
           const prepare = this.options.service.prepareAttachmentSubmission;
           if (!prepare) throw new UserFacingError("input.authorization-changed", "音视频提交准备不可用");
-          const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), media.kind === "voice" ? "audio" : "video", ticket.observer);
+          const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), media.kind === "voice" ? "audio" : "video", ticket.observer,
+            message.content.trim() ? { actorId: message.actorId, text: message.content, source: "caption" } : undefined);
           let video: PreparedVideoAttachment | undefined;
           try {
             // QQ ordinary input has no outer batching wait. Capture synchronously
@@ -874,7 +875,12 @@ export class QqMessages implements SurfaceOutputPort {
             };
             assertCurrent();
             if (media.kind === "voice" && media.referenceText) {
-              await acknowledge(await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText)), "audio");
+              await acknowledge(await prepared.submit(
+                formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText),
+                message.content.trim()
+                  ? { actorId: message.actorId, text: message.content, source: "caption" }
+                  : { actorId: message.actorId, text: media.referenceText, source: "transcription" },
+              ), "audio");
             } else {
               if (!this.options.media) throw new UserFacingError("input.authorization-changed", "音视频准备不可用");
               const file = await this.options.media.prepare(media, { target, actorId: message.actorId }, signal, assertCurrent);
@@ -898,12 +904,14 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         if (!taskImages.length && !file) {
-          await acknowledge(await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer), "text");
+          await acknowledge(await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer,
+            { actorId: message.actorId, text: message.content, source: "task" }), "text");
           return;
         }
         const prepare = this.options.service.prepareAttachmentSubmission;
         if (!prepare) throw new UserFacingError("input.authorization-changed", "附件提交准备不可用");
-        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), taskImages.length ? "image" : "file", ticket.observer);
+        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), taskImages.length ? "image" : "file", ticket.observer,
+          message.content.trim() ? { actorId: message.actorId, text: message.content, source: "caption" } : undefined);
         try {
           prepared.captureTarget();
           const signal = AbortSignal.any([ticket.signal, prepared.signal, this.lifetime.signal]);

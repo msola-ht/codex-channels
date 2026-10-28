@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { InteractionRouter, InteractionRequest } from "../approval/index.js";
 import type { AsyncUserQuestion, ConversationInputEvent, ConversationTarget } from "../conversation-core/index.js";
+import type { TitleInputContext } from "../application/index.js";
 
 interface QuestionEvent {
   target: ConversationTarget;
@@ -26,7 +27,7 @@ interface AsyncQuestionOptions {
   targetForThread(threadId: string): ConversationTarget | undefined;
   currentThread(target: ConversationTarget): string | undefined;
   captureAuthorization(target: ConversationTarget): { actorId: string; isCurrent(): boolean } | undefined;
-  submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean, requestId: string): Promise<unknown>;
+  submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean, requestId: string, titleInput: TitleInputContext): Promise<unknown>;
   warn(event: QuestionEvent, message: string): void;
   settled?(threadId: string): void;
 }
@@ -200,6 +201,7 @@ export class AsyncQuestionCoordinator {
           `异步问题回答：\n\n${answers.join("\n\n")}`,
           isCurrent,
           request.requestId,
+          { actorId: pending.actorId, text: request.questions.flatMap(question => decision.answers[question.id] ?? []).join("；"), source: "answer" },
         );
       } catch {
         this.options.warn(event, "异步回答未确认送达，请核对原会话后重新发送；Gateway 不会自动重发。");

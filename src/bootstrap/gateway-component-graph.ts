@@ -84,8 +84,10 @@ import {
   toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
+  toCompletedThreadTitleInput,
   type CodexTransport,
   type RpcNotification,
+  type ThreadTitleDiagnostics,
 } from "../codex-client/index.js";
 import {
   classifyConfigReload,
@@ -104,6 +106,7 @@ import {
   ConversationEventCoordinator,
   ReasoningRepeatGuard,
   ConversationService,
+  ThreadTitleService,
   ModelSelectionService,
   ProviderAccountService,
   calculateCloudUsageEstimates,
@@ -195,6 +198,8 @@ export abstract class GatewayComponentGraph {
   private readonly autoApprovalReview: AutoApprovalReviewTracker;
   private readonly autoApprovalReviewNotifications: AutoApprovalReviewNotifications;
   private readonly reasoningRepeatGuard: ReasoningRepeatGuard;
+  private readonly threadTitles: ThreadTitleService;
+  private titleCleanup: Promise<void> | undefined;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
@@ -348,12 +353,18 @@ export abstract class GatewayComponentGraph {
             }
           },
         } : {}) } : undefined;
+    const titleRecoveryLog = (provider: string) => (previous: ThreadTitleDiagnostics, current: ThreadTitleDiagnostics) => {
+      logger.info({ event: "thread_title.recovery", provider,
+        modelProvider: provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider,
+        serverInstance: "unknown", previous, current }, "自动命名清理恢复已检查");
+    };
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
         ...(config.codexModel ? { model: config.codexModel } : {}),
       },
       imageUploadOptions(primaryProvider),
+      titleRecoveryLog(primaryProvider),
     ));
     for (const managedProvider of managedProviders) {
       const providerTransport = createTransport(
@@ -363,6 +374,7 @@ export abstract class GatewayComponentGraph {
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {},
         imageUploadOptions(managedProvider.provider),
+        titleRecoveryLog(managedProvider.provider),
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {
@@ -372,6 +384,8 @@ export abstract class GatewayComponentGraph {
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {},
+        undefined,
+        titleRecoveryLog(customSwitchingProvider.provider),
       ));
     }
     if (aggregateEnabled) {
@@ -381,6 +395,8 @@ export abstract class GatewayComponentGraph {
       clients.set(aggregateProviderId, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {},
+        undefined,
+        titleRecoveryLog(aggregateProviderId),
       ));
     }
     this.codex = new ProviderRoutingClient(
@@ -453,6 +469,7 @@ export abstract class GatewayComponentGraph {
         this.core?.pruneUnboundTurns();
         this.reasoningRepeatGuard?.prune();
         this.asyncQuestions?.cancelStale();
+        this.threadTitles?.prune();
         this.approval?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
           this.logger.warn(
@@ -881,6 +898,46 @@ export abstract class GatewayComponentGraph {
       },
     );
     this.conversations = service;
+    this.threadTitles = new ThreadTitleService({
+      port: this.codex,
+      authorize: (target, threadId, actorId) => {
+        if (this.router.threadNameForThread(threadId)?.trim()) return undefined;
+        const binding = this.router.captureThreadTitleBinding(threadId);
+        const owner = this.router.targetForThread(threadId);
+        const provider = this.codex.knownProvider(threadId);
+        if (!binding || !owner || !provider || owner.surface !== target.surface
+          || owner.accountId !== target.accountId || owner.conversationId !== target.conversationId) return undefined;
+        const workspace = this.router.workspace(target);
+        const assertCurrent = () => {
+          this.requireRunning();
+          binding.assertCurrent();
+          const current = this.router.workspace(target);
+          if (!this.accessPolicy(target)?.isAllowed({ target, actorId })
+            || !this.bindings.actors(target).includes(actorId)
+            || current.id !== workspace.id || current.cwd !== workspace.cwd
+            || this.codex.knownProvider(threadId) !== provider) throw new Error("标题授权已失效");
+        };
+        assertCurrent();
+        return { bindingKey: binding.key, provider, cwd: workspace.cwd, assertCurrent,
+          context: () => {
+            const settings = this.router.modelSettingsForThread(threadId);
+            const permissions = this.router.permissionContextForThread(threadId);
+            if (!settings?.model || !settings.modelProvider || !permissions) return undefined;
+            return { model: settings.model, modelProvider: settings.modelProvider,
+              permissionProfile: permissions.permissions === null || permissions.permissions.startsWith(":")
+                ? { type: "builtin" as const } : { type: "custom" as const, id: permissions.permissions } };
+          } };
+      },
+      write: (target, request) => service.writeGeneratedThreadName(target, request, this.codex),
+      report: event => {
+        logger.info({ event: "thread_title.result", ...event }, "会话自动命名结算");
+        if (event.outcome === "cleanupUnconfirmed") logger.warn({ event: "thread_title.quarantined",
+          provider: event.provider, serverInstance: "unknown",
+          diagnostics: this.codex.threadTitleDiagnostics(event.provider) }, "自动命名资源清理未确认，已隔离该 Provider 的新命名");
+      },
+    });
+    service.setThreadTitleService(this.threadTitles);
+    registerConstructionCleanup("Thread Titles", () => this.closeThreadTitles());
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
     if (config.idleReleaseMinutes > 0) {
       this.conversationIdleReleaser = new ConversationIdleReleaser({
@@ -1310,7 +1367,7 @@ export abstract class GatewayComponentGraph {
           } catch { return false; }
         } };
       },
-      submit: async (target, threadId, text, isCurrent, requestId) => {
+      submit: async (target, threadId, text, isCurrent, requestId, titleInput) => {
         const surface = this.surfaces.find(candidate => candidate.surface === target.surface
           && candidate.accountId === target.accountId);
         const submission = surface?.takeAsyncAnswerSubmission?.(target, requestId);
@@ -1319,7 +1376,7 @@ export abstract class GatewayComponentGraph {
         }
         try {
           return await service.submitAsyncAnswer(target, threadId, text,
-            () => isCurrent() && (submission?.isCurrent() ?? true), submission?.observer);
+            () => isCurrent() && (submission?.isCurrent() ?? true), submission?.observer, titleInput);
         } catch (error) {
           submission?.cancel();
           try {
@@ -1554,10 +1611,21 @@ export abstract class GatewayComponentGraph {
     if (includesConfigChange(result.changes, "workspace.registry")) {
       this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
     }
+    this.threadTitles.cancelAll();
+    const titleOwners = this.router.allBindings().map(binding => ({
+      binding, actors: this.bindings.actors(binding.target),
+    }));
     for (const module of this.surfaceModules) {
       module.applyHotReload(next, result.changes);
     }
     this.config = next;
+    for (const { binding, actors } of titleOwners) {
+      if (!this.bindings.getByThread(binding.threadId) || actors.some(actorId =>
+        !this.bindings.actors(binding.target).includes(actorId)
+        || !this.accessPolicy(binding.target)?.isAllowed({ target: binding.target, actorId }))) {
+        this.router.invalidateThreadBindingLifetime(binding.threadId);
+      }
+    }
     const nonWorkspaceChanges = result.changes.filter(
       (change) => change.code !== "workspace.registry",
     );
@@ -1643,6 +1711,9 @@ export abstract class GatewayComponentGraph {
   }
 
   private async applyProviderSettingsOnce(provider: string, cancellation: AbortSignal): Promise<boolean> {
+    // Cancel before the activity barrier: title cleanup itself holds an activity lease.
+    this.threadTitles.cancelProvider(provider);
+    this.codex.cancelThreadTitleRequests(provider);
     let candidate: { fingerprint: string; models: ModelOption[] } | undefined;
     try {
       candidate = this.captureProviderModels(provider);
@@ -1823,13 +1894,27 @@ export abstract class GatewayComponentGraph {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
         const threadStateEvent = toThreadStateEvent(notification);
-        if (threadStateEvent) {
+        if (threadStateEvent && notification.isCurrentConnection?.() === true) {
           const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
           if (isCurrent) this.notificationCurrent.set(notification, isCurrent);
           if (threadStateEvent.type === "thread.closed") this.core.observeThreadClosed(threadStateEvent.threadId);
+          if (threadStateEvent.type === "thread.name.updated") {
+            this.threadTitles.nameChanged(threadStateEvent.threadId, threadStateEvent.name);
+          } else if (threadStateEvent.type !== "thread.settings.updated") {
+            this.threadTitles.cancelThread(threadStateEvent.threadId);
+          } else {
+            this.threadTitles.prune();
+          }
+        } else if (threadStateEvent?.type === "thread.settings.updated" || threadStateEvent?.type === "thread.closed") {
+          // A previous connection must not overwrite recovered settings or revoke
+          // the new subscription. Other accepted results retain normal dispatch.
+          this.notificationCurrent.set(notification, () => false);
         }
+        const titleInput = toCompletedThreadTitleInput(notification);
+        if (titleInput) this.threadTitles.completed(titleInput);
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
+        if (toolEvent?.type === "thread.reverted" && notification.isCurrentConnection?.() === true) this.threadTitles.cancelThread(toolEvent.threadId);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
         // Guard input precedes the lossy presentation queue; raw text never enters that queue via Core.
         if (toolEvent && "threadId" in toolEvent && toolEvent.threadId
@@ -1861,6 +1946,8 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.threadTitles.cancelProvider(provider);
+        this.codex.cancelThreadTitleRequests(provider);
         // A reconnect has no delta sequence numbers: never join text across connections.
         this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
@@ -1973,6 +2060,7 @@ export abstract class GatewayComponentGraph {
 
   protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
     this.stopping = true;
+    const titles = this.closeThreadTitles();
     this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();
@@ -1987,6 +2075,7 @@ export abstract class GatewayComponentGraph {
     void this.bindingRestoreCoordinator().close();
     const failures: unknown[] = [];
     if (startup && !startupSettled) {
+      await titles;
       this.removeRpcNotification?.();
       this.removeRpcNotification = undefined;
       this.removeRpcDisconnect?.();
@@ -2170,8 +2259,20 @@ export abstract class GatewayComponentGraph {
     return this.shutdownTask;
   }
 
+  private closeThreadTitles(): Promise<void> {
+    if (this.titleCleanup) return this.titleCleanup;
+    this.threadTitles?.stop();
+    this.codex.cancelThreadTitleRequests();
+    const deadline = Date.now() + 5_000;
+    this.titleCleanup = Promise.all([
+      this.threadTitles?.close(), this.codex.waitForThreadTitleCleanup(deadline),
+    ]).then(() => undefined);
+    return this.titleCleanup;
+  }
+
   private async shutdownComponentsOnce(): Promise<void> {
     this.stopping = true;
+    await this.closeThreadTitles();
     this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();

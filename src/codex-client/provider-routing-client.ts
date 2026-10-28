@@ -1,5 +1,7 @@
 import type { CodexAppServerClient } from "./client.js";
 import type { ApprovalRequest } from "../approval/index.js";
+import type { GenerateThreadTitleRequest, GenerateThreadTitleResult,
+  SetGeneratedThreadNameRequest, SetGeneratedThreadNameResult } from "../application/index.js";
 import type { InitializeResponse } from "../codex-protocol/index.js";
 import {
   JsonRpcError,
@@ -33,6 +35,11 @@ type ProviderClientMethod =
   | "revertThread"
   | "interruptTurn"
   | "setThreadName"
+  | "generateThreadTitle"
+  | "setGeneratedThreadName"
+  | "cancelThreadTitleRequests"
+  | "waitForThreadTitleCleanup"
+  | "getThreadTitleDiagnostics"
   | "setThreadPinned"
   | "compactThread"
   | "listModels"
@@ -273,6 +280,52 @@ export class ProviderRoutingClient {
   knownProvider(threadId: string): string | undefined {
     const provider = this.threadProviders.get(threadId);
     return provider === undefined ? undefined : this.canonicalProvider(provider);
+  }
+
+  async generateThreadTitle(request: GenerateThreadTitleRequest): Promise<GenerateThreadTitleResult> {
+    const provider = this.knownProvider(request.threadId);
+    if (!provider || this.canonicalProvider(request.modelProvider) !== provider || !this.connectedProviders.has(provider)) {
+      return { type: "skipped", reason: "provider-unconfirmed" };
+    }
+    const admission = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, request.deadlineMs - Date.now()))]);
+    return this.withProviderActivity(provider, async () => {
+      admission.throwIfAborted();
+      request.beforeSubmit();
+      // Optional title work uses the already subscribed instance. ensureClient may
+      // refresh Hooks through ordinary 60s RPCs and cannot fit this stage budget.
+      if (!this.connectedProviders.has(provider)) return { type: "skipped" as const, reason: "provider-unavailable" };
+      const client = this.clientForProvider(provider);
+      admission.throwIfAborted();
+      return client.generateThreadTitle(request);
+    }, admission);
+  }
+
+  async setGeneratedThreadName(request: SetGeneratedThreadNameRequest): Promise<SetGeneratedThreadNameResult> {
+    const provider = this.knownProvider(request.threadId);
+    if (!provider || !this.connectedProviders.has(provider)) return { type: "unconfirmed" };
+    const admission = AbortSignal.timeout(Math.max(1, request.deadlineMs - Date.now()));
+    return this.withProviderActivity(provider, async () => {
+      admission.throwIfAborted();
+      request.beforeSubmit();
+      if (!this.connectedProviders.has(provider)) return { type: "unconfirmed" as const };
+      const client = this.clientForProvider(provider);
+      admission.throwIfAborted();
+      return client.setGeneratedThreadName(request);
+    }, admission);
+  }
+
+  cancelThreadTitleRequests(provider?: string): void {
+    for (const [id, client] of this.clients) {
+      if (provider === undefined || id === this.canonicalProvider(provider)) client.cancelThreadTitleRequests();
+    }
+  }
+
+  async waitForThreadTitleCleanup(deadlineMs: number): Promise<void> {
+    await Promise.all([...this.clients.values()].map(client => client.waitForThreadTitleCleanup(deadlineMs)));
+  }
+
+  threadTitleDiagnostics(provider: string): ReturnType<ProviderClientInstance["getThreadTitleDiagnostics"]> | undefined {
+    return this.clients.get(this.canonicalProvider(provider))?.getThreadTitleDiagnostics();
   }
 
   fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {

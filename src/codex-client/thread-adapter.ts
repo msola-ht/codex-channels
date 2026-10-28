@@ -125,19 +125,32 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
       cwd: response.cwd,
       approvalPolicy: typeof response.approvalPolicy === "string" ? response.approvalPolicy : "granular",
       sandbox: toSandboxMode(response.sandbox.type),
-      permissions: response.activePermissionProfile?.id ?? null,
+      permissions: toThreadPermissionProfile(response.activePermissionProfile),
     },
   };
 }
 
-function toSandboxMode(type: ThreadSessionResponse["sandbox"]["type"]): ThreadSession["effectiveSettings"]["sandbox"] {
-  switch (type) {
+/** Missing provenance is unknown, whereas explicit null confirms no named profile. */
+export function toThreadPermissionProfile(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "object" || value === null || !("id" in value)) return undefined;
+  return typeof value.id === "string" && value.id.trim().length > 0 ? value.id : undefined;
+}
+
+export function toThreadSandboxMode(value: unknown): ThreadSession["effectiveSettings"]["sandbox"] | undefined {
+  switch (value) {
     case "readOnly": return "read-only";
     case "workspaceWrite": return "workspace-write";
     case "dangerFullAccess": return "danger-full-access";
     case "externalSandbox": return "external-sandbox";
-    default: throw new Error("Codex Thread 响应包含未知 sandbox 类型");
+    default: return undefined;
   }
+}
+
+function toSandboxMode(type: ThreadSessionResponse["sandbox"]["type"]): ThreadSession["effectiveSettings"]["sandbox"] {
+  const mode = toThreadSandboxMode(type);
+  if (mode === undefined) throw new Error("Codex Thread 响应包含未知 sandbox 类型");
+  return mode;
 }
 
 export function toThreadApprovalsReviewer(value: unknown): ThreadApprovalsReviewer | null {

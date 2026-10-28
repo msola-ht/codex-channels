@@ -29,6 +29,25 @@ Provider 路由层为所有转发通知附上实际连接的 Provider 路由键�
 当前 Thread 审批方式更新同时确认 RPC 成功和最新匹配设置通知；超时、断线、Thread 失效、重连或关闭会清理等待。
 空 RPC 响应不等于设置已经应用。
 
+标题专用窄端口保留原 Thread 已确认的 cwd、模型、实际 Provider 和 Permission Profile；预检在十秒内权威读取原名称、配置与模型目录。
+临时 Thread 使用锁定上游的完整工具隔离配置和 JSON Schema，不注册计划任务工具。
+普通通知和 Server Request 在 Client 边界先排除临时 Thread；意外交互安全拒绝并取消命名，最终 AgentMessage 与官方 completed 均确认后才解析标题。
+完成用户 Item 只投影身份与 Application 共用的纯文本序列摘要，started 不触发；不保留消息正文。
+生成名称写入复用普通命名的底层单次 RPC，独立阶段期限不改变普通请求的 60 秒默认值，也不重试结果未知的写入。
+名称写入前检查官方 name 和精确 cwd，写后用官方名称通知或权威读取结算；read/set 没有跨客户端条件写保证。
+
+`cancelThreadTitleRequests` 只停止后续业务操作，已提交创建和 Turn 启动仍按阶段期限接收资源身份；
+`waitForThreadTitleCleanup` 接受绝对截止时间。组合根必须在关闭连接前给全部命名清理共同最多五秒，
+`close` 只取消并关闭连接，不再叠加五秒等待，也不终止共享 App Server。
+`getThreadTitleDiagnostics` 返回隔离原因以及有界临时 Thread/Turn 身份、阶段、执行终态和订阅释放状态，不包含提示词或模型正文。
+已知资源只有匹配终态与订阅释放都确认，或官方确认对应 runtime 已关闭，才解除该资源隔离。
+创建身份未知、终态或取消订阅未确认时保留原清理责任，普通重连不直接清除隔离。
+连接握手成功后，以五秒总预算等待旧生成任务结算，并对已有精确终态但尚未释放的资源补做退订；
+只有官方确认退订后才结算该资源。恢复单飞且纳入关闭等待，前后诊断交由组合根记录，不重试模型生成。
+锁定上游禁止 ephemeral 的 includeTurns 和分页历史，因此重连后只有 idle/read 成功不足以恢复缺失的精确终态；缺少证据继续隔离，按用户指南进行人工维护。
+为隔离同连接及旧连接迟到通知，Client 最多保留 2,000 个临时标题身份；达到上限跳过新命名，普通会话不受影响。
+当前协议与本地受控输出可单独观察；真实 Provider 的 schema 兼容性、模型质量和实际服务清理仍需分别验收。
+
 0.162.0 引入的 `partial_answer` 在通知边界继续保留。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
@@ -60,6 +79,8 @@ Provider 路由层为所有转发通知附上实际连接的 Provider 路由键�
   版本，`[codex].client_identity` 可覆盖 name/title/version；仅在 `follow_cli_version = true` 时由配置层将官方身份版本解析为当前锁定版本；
   建连与重连共用连接代次，清理旧 Transport、握手与初始化响应后的每个异步边界均拒绝过期连接；
   并发关闭及重连前清理共用 Transport 关闭任务，旧失败不清理替代连接。通过 `extensions` 显式声明已实现的 `openai/form`。
+- `thread-title.ts`：自动标题的临时 Thread 隔离、完成用户输入摘要投影、严格 JSON 标题解析、阶段期限、名称写入结算、安全拒绝与有界清理诊断。
+  临时通知先于普通消费者归属判断，清理责任与隔离独立于业务绑定和普通重连。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；启动、恢复与分叉响应的实际 `approvalsReviewer` 用于会话审批方式展示，缺失或未知值映射为未知，不从全局配置推断；Thread 的当前模型及思考设置供子代理继续通知只读展示，开始通知使用官方活动的启动快照，均不等同实际请求遥测；

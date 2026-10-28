@@ -46,6 +46,7 @@ export type { ThreadSettingsUpdateParams } from "./generated/v2/ThreadSettingsUp
 export type { ThreadSettingsUpdateResponse } from "./generated/v2/ThreadSettingsUpdateResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
+export type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 export type { DynamicToolSpec } from "./generated/v2/DynamicToolSpec.js";
 export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribeResponse.js";
 export type { ThreadArchiveResponse } from "./generated/v2/ThreadArchiveResponse.js";

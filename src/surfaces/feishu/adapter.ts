@@ -153,7 +153,9 @@ export class FeishuConversationAdapter {
     const kind = message.kind === "text" ? undefined : message.kind;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(message.target, allowed, kind,
-      () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind));
+      () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind, undefined,
+        (message.kind === "image" || message.kind === "video") && message.text?.trim()
+          ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined));
     this.receivedAttachments.set(message, receipt);
     return Object.assign(
       () => { receipt.dispose(); this.receivedAttachments.delete(message); },
@@ -305,6 +307,8 @@ export class FeishuConversationAdapter {
           formatQuotedInput(message.text, quotedText),
           () => !this.videoCancellation.signal.aborted
             && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+          undefined,
+          { actorId: message.actorId, text: message.text, source: "task" },
         ),
       );
       this.settleTurnReplyTarget(
@@ -750,6 +754,8 @@ export class FeishuConversationAdapter {
       check();
       submissionScope = await this.receivedAttachments.get(message)?.prepare() ?? this.conversations.prepareAttachmentSubmission(message.target, () =>
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+        "video", undefined,
+        message.text?.trim() ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
       check();
@@ -879,7 +885,7 @@ export class FeishuConversationAdapter {
     if (!scope) throw new UserFacingError("image.download-failed", "图片提交能力尚未就绪");
     const downloadCancellation = new AbortController();
     const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal, downloadCancellation.signal]);
-    const inputs = new SurfaceInputBatcher((_target, input) => scope.submit(input), this.inputOptions);
+    const inputs = new SurfaceInputBatcher((_target, input, _actorId, titleInput) => scope.submit(input, titleInput), this.inputOptions);
     try {
       scope.captureTarget();
       const imageDownloads = messages.map(message => message.imageKeys.map(imageKey =>
@@ -906,6 +912,7 @@ export class FeishuConversationAdapter {
           sequence,
           aggregationKey: `feishu:${replyMessage.messageId}`,
           aggregationSize: messages.length,
+          ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
           ...(currentText
             ? { text: formatQuotedInput(currentText, quotedText) }
             : quotedText === undefined
