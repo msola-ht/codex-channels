@@ -25,12 +25,12 @@ export class ChatToResponses {
   private finishReason: string | undefined;
   private ended = false;
   private bytes = 0;
-  constructor(private readonly id: string, private readonly model: string, private readonly toolNames?: ReadonlyMap<string, ChatToolIdentity>) {}
+  constructor(private readonly id: string, private readonly model: string, private readonly toolNames?: ReadonlyMap<string, ChatToolIdentity>, private toolChoice: unknown = "auto") {}
 
   start(): JsonObject[] { return [this.event("response.created", { response: this.response("in_progress", this.aggregateUsage()) })]; }
 
   /** Called immediately before submitting a model round, not while preparing it. */
-  beginModelRound(): void { this.awaitingNextRound = false; }
+  beginModelRound(toolChoice: unknown = this.toolChoice): void { this.toolChoice = toolChoice; this.awaitingNextRound = false; }
 
   fail(error: JsonObject): JsonObject[] {
     let usage: JsonObject | undefined;
@@ -297,8 +297,28 @@ export class ChatToResponses {
   }
   private validateCalls(): Array<[number, ToolState, ChatToolIdentity | undefined]> {
     if ((this.tools.size > 0) !== (this.finishReason === "tool_calls")) throw new ModelConversionError("Chat tool finish reason mismatch");
+    const choice = this.toolChoice;
+    let allowed: ReadonlySet<string> | undefined;
+    let required = choice === "required";
+    if (choice !== undefined && choice !== "auto" && choice !== "required") {
+      allowed = new Set<string>();
+      if (choice !== "none") {
+        const selected = object(choice);
+        if (selected.type === "function") {
+          allowed = new Set([string(object(selected.function).name)]); required = true;
+        } else if (selected.type === "allowed_tools") {
+          const subset = object(selected.allowed_tools);
+          if (subset.mode !== "auto" && subset.mode !== "required") throw new ModelConversionError("Invalid Chat tool choice");
+          allowed = new Set(array(subset.tools).map(raw => string(object(object(raw).function).name)));
+          required = subset.mode === "required";
+        }
+        // Unmapped upstream-owned choices grant no local client tool identity.
+      }
+    }
+    if (required && !this.tools.size) throw new ModelConversionError("Required Chat tool call is missing", { toolChoiceViolation: true });
     return [...this.tools].map(([index, state]) => {
       if (!state.name) throw new ModelConversionError("Missing Chat tool name");
+      if (allowed && !allowed.has(state.name)) throw new ModelConversionError("Chat tool call violates tool choice", { toolChoiceViolation: true });
       const identity = this.toolNames?.get(state.name);
       if (this.toolNames && !identity) throw new ModelConversionError("Unknown Chat tool name");
       if (identity?.kind === "web_search") hostedSearchQuery(state.arguments);

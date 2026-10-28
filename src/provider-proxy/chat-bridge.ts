@@ -205,7 +205,7 @@ export class ChatCompletionsBridge {
       delete headers[chatDiagnosticsHeader];
       delete headers["content-encoding"];
       Object.assign(headers, { "content-type": "application/json", accept: "text/event-stream", "accept-encoding": "identity" });
-      converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames);
+      converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames, body.tool_choice);
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
         for (const event of events) {
           controller.signal.throwIfAborted();
@@ -252,7 +252,7 @@ export class ChatCompletionsBridge {
         // A synchronous submission failure skips the await below; cancellation still settles it.
         void ready.catch(() => undefined);
         phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
-        converter.beginModelRound();
+        converter.beginModelRound(outbound.tool_choice);
         const submittedAt = performance.now();
         upstreamRequest.end(payload);
         upstreamUrl = sanitizeModelRequestUrl(/^https?:\/\//u.test(upstreamRequest.path) ? upstreamRequest.path
@@ -302,13 +302,8 @@ export class ChatCompletionsBridge {
         upstreamRequest.destroy();
         const searches = webSearch ? converter.hostedSearchCalls(webSearch.name) : [];
         if (!webSearch || searches.length === 0) break;
-        const choice = outbound.tool_choice;
-        if (choice !== undefined && choice !== "auto" && choice !== "required"
-          && !(typeof choice === "object" && choice !== null && "type" in choice && choice.type === "function"
-            && "function" in choice && typeof choice.function === "object" && choice.function !== null
-            && "name" in choice.function && choice.function.name === webSearch.name)) {
-          throw new ChatUpstreamError("clp_search_tool_choice", "上游返回的搜索调用违反本轮工具选择限制，已阻止联网搜索。", false);
-        }
+        // hostedSearchCalls validates the whole tool set against this round's
+        // choice before any search network request or client completion.
         generationBlocked = true; // Multiple model generations plus network search are not one decoding interval.
         if (searchCount + searches.length > 4) throw new ChatUpstreamError("clp_search_limit", "本次模型请求已达到最多 4 次网页搜索的限制。", false);
         if (remainingTokens !== undefined) {
@@ -339,6 +334,10 @@ export class ChatCompletionsBridge {
         // A forced initial search must not force an unbounded loop on the next model call.
         if (outbound.tool_choice === "required" || typeof outbound.tool_choice === "object" && outbound.tool_choice !== null
           && "function" in outbound.tool_choice && (outbound.tool_choice.function as { name?: unknown })?.name === webSearch.name) outbound.tool_choice = "auto";
+        else if (typeof outbound.tool_choice === "object" && outbound.tool_choice !== null && "allowed_tools" in outbound.tool_choice) {
+          const subset = outbound.tool_choice.allowed_tools as { mode: string; tools: unknown[] };
+          outbound.tool_choice = { type: "allowed_tools", allowed_tools: { ...subset, mode: "auto" } };
+        }
       }
       const terminal = converter.finish();
       timing.totalDurationMs = performance.now() - timing.submittedAt;
@@ -356,6 +355,10 @@ export class ChatCompletionsBridge {
         : terminalController.signal.reason instanceof ChatUpstreamError ? terminalController.signal.reason : undefined;
       let failure = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error
         : aborted;
+      if (failure instanceof ModelConversionError && failure.diagnostics?.toolChoiceViolation === true) {
+        diagnostics.conversion(failure.diagnostics);
+        failure = new ChatUpstreamError("chat_tool_choice", "上游返回违反本轮工具选择限制，已阻止工具交付和联网搜索。", false);
+      }
       if (failure instanceof ModelConversionError && failure.diagnostics?.webSearch === "unsupported_controls") {
         const control = failure.diagnostics.webSearchControl;
         const reason = control === "external_web_access" ? "external_web_access 必须为 true，请将联网搜索设为 live。"
@@ -384,7 +387,7 @@ export class ChatCompletionsBridge {
           if (response.headersSent) {
             // Codex treats unknown SSE error codes as retryable. Preserve the
             // local classification in type while stopping permanent CLP failures.
-            const wireDetail = failure instanceof ChatUpstreamError && failure.code.startsWith("clp_")
+            const wireDetail = failure instanceof ChatUpstreamError && (failure.code.startsWith("clp_") || failure.code === "chat_tool_choice")
               ? { ...detail, type: detail.code, code: failure.retryable ? detail.code : "invalid_prompt",
                 ...(failure.retryable && failure.retryAfter !== undefined ? { headers: { "retry-after": failure.retryAfter } } : {}) }
               : detail;

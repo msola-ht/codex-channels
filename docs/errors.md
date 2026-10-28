@@ -9,7 +9,7 @@
 
 受管 CLP 独立搜索适配使用 `clp_search_authentication_error`、`clp_search_payment_required`、`clp_search_permission_denied`、`clp_search_rate_limit`、`clp_search_timeout`、`clp_search_invalid_response`、`clp_search_upstream_error` 和 `clp_search_cancelled` 区分搜索接口故障。`clp_search_unsupported_controls` 提示改用 live 并移除不支持的控制；`clp_search_mixed_tools` 表示上游同轮混合了搜索与客户端工具；`clp_search_limit` 和 `clp_search_output_limit` 表示次数或输出预算不足。错误列表及调用详情按精确代码显示固定中英文文案，外层 HTTP 200/502 不掩盖搜索原因，本地断连仍优先。原生诊断的 `web_search_unsupported` 与适配错误不同，见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。
 
-`clp_search_tool_choice` 表示上游搜索调用违反本轮工具选择限制，联网前已阻止。CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久搜索失败引发整轮自动重试。
+`chat_tool_choice` 表示 Chat 桥上游返回违反本轮工具选择限制，或必调工具缺失；在客户端工具交付和该轮托管搜索联网前已阻止。旧记录中的 `clp_search_tool_choice` 是原先仅针对搜索调用的分类。工具选择违规及 CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久失败引发整轮自动重试。
 
 OLC 托管搜索的 `olc_search_authentication_error`、`olc_search_permission_denied`、`olc_search_rate_limit`、`olc_search_timeout`、`olc_search_invalid_response` 和 `olc_search_upstream_error` 分别表示搜索接口的认证、权限、限流、超时、格式和连接／服务故障；`olc_search_deadline` 表示整次请求期限已到，`olc_search_failed` 表示工具、预算或材料复核失败。错误列表和详情优先显示这些安全分类，不把最后一次模型 HTTP 200 当作搜索成功。搜索已开始后的失败以同一响应的 `response.failed` 收尾，wire code 为 `invalid_prompt`，具体原因保留在 type 和指标中，防止原生 Codex 把整个搜索请求自动重放。失败搜索不发布完成项；本地期限或撤销停止上游后仅保留既有的 5 秒失败交付预算，客户端已经断开或终态交付本身失败时无法保证送达。
 
