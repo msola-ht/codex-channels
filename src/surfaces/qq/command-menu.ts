@@ -122,9 +122,9 @@ export function renderQqStaticCommandMenu(input: string): { content: string; key
     ] } },
   };
   if (input === "settings") return {
-    content: "## 会话偏好\n\n### 当前会话设置\n\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
+    content: "## 会话偏好\n\n### 当前会话设置\n\n- Plan：点击后切换协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
     keyboard: { content: { rows: [
-      { buttons: [commandButton("plan")] },
+      { buttons: [commandButton("plan", { label: "切换 Plan 模式" })] },
       { buttons: [commandButton("autoreview", { label: "会话审批方式" }), commandButton("permissions")] },
       { buttons: [homeButton()] },
     ] } },
