@@ -50,8 +50,8 @@ export function renderQueueCommandCenterChoices(
   }
   const start = chunk * feishuQueueChoiceChunkSize;
   const visibleItems = items.slice(start, start + feishuQueueChoiceChunkSize);
-  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item) => ({
-    label: queueChoiceLabel(item),
+  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item, index) => ({
+    label: choiceButtonLabel(`${result.result.selectors[start + index] ?? "?"} · ${queueChoiceLabel(item)}`),
     action: "queue",
     input: `item ${result.result.page} ${chunk + 1} ${item.id}`,
   }));
@@ -97,9 +97,23 @@ export function renderQueueCommandCenterChoices(
   const lastVisible = visibleItems.length > 0 ? start + visibleItems.length : 0;
   return {
     title: `App Server Queue · 第 ${result.result.page}/${result.result.pageCount} 页`,
-    description: result.result.totalItemCount === 0
-      ? "Queue 为空；可新增纯文本条目。更新与排序请使用 /queue update|reorder 文本命令。"
-      : `当前显示第 ${firstVisible}-${lastVisible}/${items.length} 条；业务页最多 25 条，卡片按每组最多 ${feishuQueueChoiceChunkSize} 条展示。条目操作只使用安全预览，点击后可启动或删除；更新与排序请使用 /queue update|reorder 文本命令。`,
+    description: [
+      `共 ${result.result.totalItemCount} 条${visibleItems.length > 0 ? ` · 本页第 ${firstVisible}-${lastVisible}/${items.length} 条` : ""}`,
+      "",
+      ...(result.result.totalItemCount === 0
+        ? ["Queue 为空；可新增纯文本条目。", ""]
+        : result.result.page > result.result.pageCount
+        ? ["当前页面已不存在，请使用 /queue list 1 重新查看。", ""]
+        : visibleItems.flatMap((item, index) => [
+            `**${result.result.selectors[start + index] ?? "?"}. ${formatThreadQueueInputTypeLabel(item.inputType)}** · ${item.editable ? "可更新" : "只读摘要"}`,
+            "",
+            `安全预览：${choiceCardLiteral(item.textPreview ?? "", 120) || "（无文本预览）"}`,
+            "",
+          ])),
+      ...(visibleItems.length > 0 ? ["点击条目查看详情；启动和删除在详情中操作。", ""] : []),
+      "更新与排序请使用 /queue update|reorder 文本命令。预览过长时会截断。",
+    ].join("\n"),
+    descriptionFormat: "lark_md",
     choices,
   };
 }
@@ -166,9 +180,8 @@ export function renderQueueDeleteConfirmationChoices(
 function queueChoiceLabel(
   item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
 ): string {
-  return item.textPreview
-    ? item.textPreview
-    : `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
+  return formatModelSettingLiteral(item.textPreview ?? "")
+    || `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
 }
 
 export function renderCommandCenterInitialChoices(
