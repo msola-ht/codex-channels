@@ -21,7 +21,7 @@ HTTP 上游状态与 Relay 对外状态分别解释：上游 429/503/504 保留�
 请求指标的可空 `upstreamUrl` 只在实际模型 HTTP 请求提交后从出站请求读取，保存最后一次已提交目标的 Origin 与路径；不保存用户信息、查询参数或片段，不从当前 Provider 配置回填历史。Chat 与 Responses 共用直接发送点，转储关闭时仍采集。
 Relay 只转发外部调用方自带的响应报文，不归一化 Codex 私有输入项（`agent_message`、`encrypted`
 参数标记）；Codex CLI 的子代理流量经 App Server 的 Provider Proxy，不经过 Relay。
-可信 OLC 材料分别显式开启 freeform 双向表示适配与 hosted live 网页搜索，复用 model-api 纯转换、Provider Proxy 的 Responses reader 和独立搜索编排公开出口；不按 URL 或模型名猜测，不开启 Chat 或客户端工具搜索。请求历史只包装本次明确 custom 声明及 call_id 配对，历史 web_search_call 只保留可读查询，不自动搜索。搜索与续答每次保留 Key 精确模型授权及材料复核，共用请求取消与有界总期限；混合客户端调用以 not_executed 内部配对，Relay 不执行客户端工具、不保存会话历史。每个实际模型轮使用独立采集器，内层已收齐的模型轮先结束记录，最后模型轮关联外部交付和唯一累计指标；启用转储时内部续答的查询/摘要可随真实模型请求保存。最终输出、累计计量、缺计数、取消和资源限制与 Proxy 共用同一编排合同，真实云端搜索尚未验收。
+可信 OLC 材料分别显式开启 freeform 双向表示适配与 hosted live 网页搜索，复用 model-api 纯转换、Provider Proxy 的 Responses reader 和独立搜索编排公开出口；不按 URL 或模型名猜测，不开启 Chat，也不执行客户端工具搜索。请求内按 call_id 配对的 custom 历史不要求当前工具声明，但不授予新调用权限；历史 tool_search_output 仅在当前仍声明客户端 tool_search 且 tool_choice 不是 none 时补充装载，选择限制继续生效。转换过 custom 或客户端搜索历史后，即使当前工具为空，也保留 JSON/SSE 新调用校验。历史 web_search_call 只保留可读查询，不自动搜索。搜索与续答每次保留 Key 精确模型授权及材料复核，共用请求取消与有界总期限；混合客户端调用以 not_executed 内部配对，Relay 不执行客户端工具、不保存会话历史。每个实际模型轮使用独立采集器，内层已收齐的模型轮先结束记录，最后模型轮关联外部交付和唯一累计指标；启用转储时内部续答的查询/摘要可随真实模型请求保存。最终输出、累计计量、缺计数、取消和资源限制与 Proxy 共用同一编排合同，真实云端搜索尚未验收。
 
 模型请求与 App Server 代理共用 `runtime/model-request-policy.mjs` 的纯阶段预算：准备 30 秒、真实出站首响应头 300 秒、完整 SSE 数据事件空闲 300 秒、非流式 JSON 完整读取 300 秒、错误正文 5 秒；生成没有总期限。交付受阻最多 30 秒，终态或失败交付最多 5 秒，取消/断连/撤销会清理等待并释放准入租约。完整事件等待不因注释或零碎字节续期，也不把下游背压计为上游空闲。策略独立于凭据材料 revision；更新程序后重启 Relay 生效，不借材料热更新修改在途请求的计时。
 
