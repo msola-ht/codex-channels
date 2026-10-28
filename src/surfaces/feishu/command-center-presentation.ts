@@ -32,6 +32,7 @@ import { renderFeishuCommandResult } from "./renderer.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
 import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
 import { createModelSelectionPresentation } from "../model-selection-presentation.js";
+import { createSessionListPresentation } from "../session-list-presentation.js";
 
 const feishuQueueChoiceChunkSize = 13;
 
@@ -537,7 +538,7 @@ export function renderCommandCenterChoices(
     if (result.sessions.length === 0) {
       return undefined;
     }
-    const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
+    const entries = createSessionListPresentation(result);
     return {
       title: "选择会话",
       description: "点击后切换到对应 Codex Session。",
@@ -548,8 +549,8 @@ export function renderCommandCenterChoices(
           input: "",
         },
         ...sessionNavigationChoices(result, "sessions"),
-        ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
+        ...entries.map(({ session, isCurrent, isBackground }) => ({
+          label: `${isCurrent ? "✓ " : isBackground ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),
@@ -570,7 +571,7 @@ export function renderCommandCenterChoices(
           input: "",
         },
         ...sessionNavigationChoices(result, "archived"),
-        ...result.sessions.map((session) => ({
+        ...createSessionListPresentation(result).map(({ session }) => ({
           label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "unarchive" as const,
           input: session.id,

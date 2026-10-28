@@ -259,6 +259,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `model-selection-presentation.ts` 统一模型菜单的 Provider 顺序、浏览范围内的原始模型条目和位置、当前身份及速度候选项。
 匹配当前身份的目录项与可用当前模型分开返回，保留各渠道对不可用项和默认思考等级的既有显示差异。
 它不构造交互快照、令牌或执行请求，不修改 Provider 浏览状态；渠道继续拥有分页、字面格式、选项准入及回调，Application 仍校验选择与提交。
+`session-list-presentation.ts` 统一历史及归档列表的原始会话、显示序号和当前／后台标记。
+它保留 Application 的列表顺序与 selector，不重新分页或解析选择；标题回退、截断、标记优先级、恢复动作及交互有效性仍由原消费者负责。
 纯格式化实现分别位于
 `conversation-command-help.ts`、`conversation-session-command-format.ts`、
 `conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、

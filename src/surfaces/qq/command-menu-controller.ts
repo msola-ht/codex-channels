@@ -17,6 +17,7 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
 import { createModelSelectionPresentation } from "../model-selection-presentation.js";
+import { createSessionListPresentation } from "../session-list-presentation.js";
 import { cloudUsageChoices } from "../cloud-usage-format.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
@@ -780,15 +781,14 @@ export class QqCommandMenuController {
   private sessions(context: MenuContext, result: Sessions, page: number): QqMenuPanel {
     const pages = result.pageCount;
     if (page > pages) throw unsupported();
-    const background = new Set(result.backgroundThreadIds ?? []);
     const title = result.archived ? "已归档会话" : "历史会话";
     const heading = `## ${title}\n\n共 ${result.matchedSessionCount} 条 · 第 ${page} / ${pages} 页`;
     const hint = "点击下方对应会话恢复；省略号表示标题或字段已截断。";
-    const entries = result.sessions.map((session, index) => ({
+    const entries = createSessionListPresentation(result).map(({ session, selector, isCurrent, isBackground }) => ({
       session,
-      number: session.selector ?? index + 1,
+      number: selector,
       text: [
-        `**${session.selector ?? index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}${session.id === result.currentThreadId ? "（当前）" : background.has(session.id) ? "（后台）" : ""}${session.isPinned ? "（固定）" : ""}**\n`,
+        `**${selector}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}${isCurrent ? "（当前）" : isBackground ? "（后台）" : ""}${session.isPinned ? "（固定）" : ""}**\n`,
         [
           ...(session.model ? [`模型：${markdown(session.model, 60)}`] : []),
           ...(session.reasoningEffort ? [`${reasoningEffortSettingName(session.reasoningEffort)}：${markdown(formatReasoningEffort(session.reasoningEffort), 40)}`] : []),
