@@ -75,6 +75,8 @@ App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可�
 
 支持的能力声明是 `apply_patch_tool_type: "freeform"` 或 `null`，客户端工具搜索由布尔 `supports_search_tool` 控制。`execution: "client"` 的 `tool_search` 映射为普通函数，返回还原为客户端搜索调用；Codex 返回的搜索结果中所声明的工具会加入后续请求，已加载工具移除 `defer_loading` 标记。支持 JSON/SSE、命名空间、强制工具选择及完整历史往返；拒绝服务端工具搜索、未加载的延迟工具、孤立或冲突的历史及加密 custom 历史。适配不执行搜索到的工具，权限仍由原生 Codex 控制。旧目录必须显式更新才启用。本地原生 `apply_patch` 与客户端工具搜索的合成上游观察不能保证真实云端每个模型的行为。
 
+历史 custom 调用及其结果按本请求的 `call_id` 配对转换，不要求当前仍声明该工具；这覆盖 Codex 通过普通 Responses 总结历史、工具声明为空的本地压缩请求，不代表支持 `/responses/compact` 远程压缩。历史转换不补充工具授权；即使当前没有 custom 声明，转换过工具历史的请求仍启用 JSON/SSE 响应校验，新返回的调用必须符合当前工具声明。
+
 ## 托管实时网页搜索
 
 Ollama 搜索可能收费，因此未设置 `web_search` 时默认关闭。切换账户的 Profile 缺项不再继承全局搜索，CLI／WebUI 的“默认关闭”会清除该账户的显式覆盖；已保存的模式保持不变。需要搜索时，在 `codexc config → 提供商联网搜索`、Setup 同名入口或 WebUI 提供商行显式选择 **live**。固定提供商仍使用主配置的显式值，在“全局设置 → 行为与偏好”中修改；主配置缺项时也按关闭启动，不改写主配置。新默认由下次启动的 App Server 消费，不改变已加载会话；原生显式搜索覆盖与独立 Relay 请求声明保持原合同。若请求实际声明 cached/indexed，即使提示词没有要求搜索，也会在模型出站前拒绝整次请求。

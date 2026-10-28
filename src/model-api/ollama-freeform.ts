@@ -201,7 +201,10 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
       calls.set(call, "custom");
       plain(raw);
       const id = identity(raw), found = identities.get(key(id.name, id.namespace));
-      if (!found || found.kind !== "custom") fail();
+      // Compaction sends history without tool declarations. A historical call
+      // describes past execution; it must not grant a tool to the next response.
+      // Keep current declarations authoritative only for newly returned calls.
+      if (found && found.kind !== "custom") fail();
       if (typeof raw.input !== "string" || !wellFormed(raw.input) || bytes(raw.input) > argumentLimit) fail();
       const { input: value, ...rest } = raw; changed = true;
       return { ...rest, type: "function_call", arguments: JSON.stringify({ input: value }) };
@@ -218,7 +221,7 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
   }) : source.input;
   for (const [call, kind] of calls) if (kind !== "function" && !outputs.has(call)) fail();
   return { body: changed ? { ...source, tools, ...(source.tool_choice === undefined ? {} : { tool_choice: mapChoice(source.tool_choice) }), input } : source,
-    adapter: new OllamaFreeformResponse(identities, allowed, new Set(calls.keys())) };
+    adapter: new OllamaFreeformResponse(identities, allowed, calls) };
 }
 
 interface Call {
@@ -243,8 +246,9 @@ export class OllamaFreeformResponse {
   private readonly itemIndexes = new Map<number, string>();
   private readonly toolCalls = new Map<string, string>();
   private readonly completedTools = new Map<string, string>();
-  constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlySet<string>) {
-    this.active = [...identities.values()].some(tool => tool.kind !== "function");
+  constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlyMap<string, Identity["kind"]>) {
+    this.active = [...identities.values()].some(tool => tool.kind !== "function")
+      || [...historyCalls.values()].some(kind => kind !== "function");
   }
 
   close(): void {
