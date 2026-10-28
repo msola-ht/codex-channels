@@ -693,7 +693,7 @@ export class TelegramSurface {
       }, String(context.from.id));
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
@@ -847,7 +847,7 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^rc:page:([1-9]\d{0,3})$/, async context => {
       await context.answerCallbackQuery({ text: "正在查询重置券" });
       const result = await this.commands.execute(target(context), "limits", `reset ${context.match[1]}`, String(context.from.id));
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^rc:use:([1-9]\d{0,3}):([0-7]):([A-Za-z0-9_-]{43})$/, async context => {
       await context.answerCallbackQuery({ text: "正在核对重置券" });
@@ -860,7 +860,7 @@ export class TelegramSurface {
       const credit = listed.result.credits[Number(context.match[2])];
       if (!credit) throw new UserFacingError("reset-credit.failed", "重置券列表已变化", { reason: "reset_stale" });
       const result = await this.commands.execute(target(context), "limits", `reset use ${credit.id}`, actor);
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^rc:(confirm|cancel):([0-9a-f-]{36})$/, async context => {
       await context.answerCallbackQuery({ text: "正在处理重置券确认" });
@@ -868,7 +868,7 @@ export class TelegramSurface {
       // 业务结果已确定；清理旧按钮失败不能把已消费误报为消费失败。
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "重置券按钮清理失败"); }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(
       /^schedule:confirm:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
@@ -883,18 +883,22 @@ export class TelegramSurface {
           `confirm ${context.match[1]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
       },
     );
     this.bot.callbackQuery("schedule:cancel", async (context) => {
-      await context.answerCallbackQuery({ text: "已取消" });
+      await context.answerCallbackQuery({ text: "返回计划任务列表" });
       await context.editMessageReplyMarkup({
         reply_markup: { inline_keyboard: [] },
       });
-      await context.reply("已取消计划任务操作。未创建或删除任何任务。");
+      const result = await this.commands.execute(target(context), "schedule", "list", String(context.from.id));
+      await this.renderCommandResult(context, result, async (replyContext, replyResult, reply) => {
+        await reply("已关闭这条消息的确认按钮；本次未提交创建或删除。原确认码在五分钟有效期内仍可通过命令使用。");
+        await renderTelegramCommandResult(replyContext, replyResult, reply);
+      });
     });
     this.bot.callbackQuery(/^plugin:page:([1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在加载 Plugin" });
@@ -904,7 +908,7 @@ export class TelegramSurface {
         `list ${context.match[1]}`,
         String(context.from.id),
       );
-      await renderTelegramCommandResult(
+      await this.renderCommandResult(
         context,
         result,
       );
@@ -922,7 +926,7 @@ export class TelegramSurface {
         try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
         catch (error) { this.logger.warn(surfaceErrorMetadata(error), "Hook 确认按钮清理失败"); }
       }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(
       /^plugin:select:([A-Za-z0-9_-]{43})$/,
@@ -966,7 +970,7 @@ export class TelegramSurface {
         `list ${context.match[1]}`,
         String(context.from.id),
       );
-      await renderTelegramCommandResult(
+      await this.renderCommandResult(
         context,
         result,
       );
@@ -1013,7 +1017,7 @@ export class TelegramSurface {
           `start ${context.match[2]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1061,7 +1065,7 @@ export class TelegramSurface {
           `delete ${context.match[2]}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1112,7 +1116,7 @@ export class TelegramSurface {
           `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1589,13 +1593,16 @@ export class TelegramSurface {
     };
   }
 
-  private async renderCommandResult(context: Context, result: ConversationCommandResult): Promise<void> {
+  private async renderCommandResult(
+    context: Context,
+    result: ConversationCommandResult,
+    render: (context: Context, result: ConversationCommandResult, reply: Context["reply"]) => Promise<void> = renderTelegramCommandResult,
+  ): Promise<void> {
     const relevant = result.kind === "status" || result.kind === "workspaces" || result.kind === "models"
       || result.kind === "metrics" || result.kind === "usage" || result.kind === "limits"
       || result.kind === "sessions" || result.kind === "collaboration-mode"
       || result.kind === "outcome" && ["workspace.selected", "thread.resumed", "thread.unarchived", "thread.forked",
         "session.new", "thread.archived", "thread.renamed", "thread.pin-updated", "sessions.cleaned"].includes(result.outcome.type);
-    if (!relevant) return renderTelegramCommandResult(context, result);
     const original = this.commandReplies.get(context);
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
@@ -1639,8 +1646,13 @@ export class TelegramSurface {
       assertActor();
       this.usageEdits.get(context)?.assertActive();
       const current = this.commandReplyScope(inputTarget);
-      if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
-        || current.selectionScope !== scope.selectionScope || current.threadId !== scope.threadId) {
+      // Extension/task queries belong to the original workspace and thread,
+      // but do not depend on model browsing. Completed outcomes keep their
+      // business identity rather than acquiring a new model-selection scope.
+      if ((relevant || result.kind !== "outcome")
+        && (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
+          || current.threadId !== scope.threadId
+          || relevant && current.selectionScope !== scope.selectionScope)) {
         throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
       }
     };
@@ -1674,7 +1686,7 @@ export class TelegramSurface {
           messageId: deliveredId, expiresAt: this.now() + 10 * 60_000, scope: { ...scope }, inputs: choices.map(choice => choice.input) });
         return;
       }
-      await renderTelegramCommandResult(context, result, (text, options) => this.apiExecutor.call({
+      await render(context, result, (text, options) => this.apiExecutor.call({
         chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
       }, requestSignal => {
         guard();
@@ -1716,7 +1728,9 @@ export class TelegramSurface {
       });
     }
     try {
-      await replyTelegramPanel(context, formatConversationAutoReview(result), token ? threadAutoReviewKeyboard(token) : undefined);
+      await this.renderCommandResult(context, result, async (_context, _result, reply) => {
+        await replyTelegramPanel(context, formatConversationAutoReview(result), token ? threadAutoReviewKeyboard(token) : undefined, reply);
+      });
     } catch (error) {
       if (token) this.autoReviewSelections.delete(token);
       throw error;

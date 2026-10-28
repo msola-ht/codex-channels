@@ -37,7 +37,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   未配置 `videoDirectory` 时明确拒绝视频，关闭时取消下载，迟到结果不提交；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的
-  Gateway 计划任务；创建与删除预览直接提供原生确认/取消按钮，确认仍复用五分钟一次性令牌；选择支持多个思考等级的模型后及直接打开 `/effort` 面板时提供思考等级内联按钮；
+  Gateway 计划任务；创建与删除预览提供原生确认/返回列表按钮，返回只关闭该消息按钮，不撤销五分钟内有效的业务确认码；选择支持多个思考等级的模型后及直接打开 `/effort` 面板时提供思考等级内联按钮；
   同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。仅对 `startupRecipients` 调用
@@ -45,8 +45,9 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   空闲解除通知在能确定唯一授权 Actor 时附带“恢复此会话”按钮，仍保留 `/r` 命令；随机一次性
   令牌绑定接收者、聊天、通知消息和 Thread，10 分钟有效，最多保留 100 项，关闭时清空。
   点击复用 Application 的恢复命令与工作区检查；过期或重启后的按钮提示使用原通知中的命令。
-- `command-renderer.ts`：复用共享命令结果映射，负责 Telegram 专属展示、按钮和消息发送；模型按钮的随机令牌
-  绑定当前模型、浏览范围、有序选项、页面所属 Conversation/Workspace/Thread/Session 与 Actor，
+- `command-renderer.ts`：复用共享命令结果映射，负责 Telegram 专属展示、按钮和消息发送。
+  通用面板先发送全部正文分片，最后一片携带按钮；Hook 列表按钮带正文编号。命令与回调结果通过 Bot 的 ordered queue／API Executor 发送，逐片复核原授权和停止状态；扩展、计划任务等查询复核原工作区与 Thread，不绑定模型浏览状态，已完成操作保留业务结果身份。
+  模型按钮的随机令牌绑定当前模型、浏览范围、有序选项、页面所属 Conversation/Workspace/Thread/Session 与 Actor，
   不能跨目标或操作者复用；最多保留 1000 份菜单状态。列表变化或状态淘汰后旧按钮明确失效，
   不按新列表重新解释旧序号。
   思考等级提交后的新菜单按与刷新相同的 Provider 浏览范围及可选目录生成；操作本身仍用当前模型所属目录验证能力，真实目录或会话变化继续使旧按钮失效。

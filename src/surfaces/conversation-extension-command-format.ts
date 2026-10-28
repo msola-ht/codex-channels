@@ -5,6 +5,7 @@ import {
 } from "../application/index.js";
 
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatModelSettingLiteral } from "./conversation-model-account-command-format.js";
 
 const maximumMcpDetailEntries = 8;
 const maximumMcpHealthFindings = 8;
@@ -17,13 +18,15 @@ const mcpToolAccessNotice =
 export function formatConversationSkills(
   result: Extract<ConversationCommandResult, { kind: "skills" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
   return result.entries.length === 0
     ? "当前没有已启用的 Skills。"
     : toStructuredMarkdownList([
         `已安装 Skills（${result.entries.length}）：`,
         ...result.entries.map(
-          (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
+          (skill, index) => `${index + 1}. ${literal(skill.name)}${skill.invocable === false ? " · 不可直接调用" : ""}：${literal(skill.description)}\n`,
         ),
         "",
         ...(queryOnly ? [] : ["使用：/skill <名称或序号> <任务>"]),
@@ -33,14 +36,16 @@ export function formatConversationSkills(
 export function formatConversationAgents(
   result: Extract<ConversationCommandResult, { kind: "agents" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
   return result.roles.length === 0
     ? "当前没有可用的子代理角色。"
     : toStructuredMarkdownList([
         `子代理角色（${result.roles.length}）：`,
         ...result.roles.map(
           (role, index) =>
-            `${index + 1}. ${role.name}${role.description ? `：${role.description}` : ""}`,
+            `${index + 1}. ${literal(role.name)}${role.description ? `：${literal(role.description)}` : ""}\n`,
         ),
         "",
         ...(queryOnly ? [] : ["使用：/agents <角色名称或序号> <任务>"]),
@@ -50,7 +55,9 @@ export function formatConversationAgents(
 export function formatConversationMcp(
   result: Extract<ConversationCommandResult, { kind: "mcp" }>,
   offset = 0,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
   if (result.servers.length === 0) {
     return toStructuredMarkdownList("MCP Servers（0）：");
   }
@@ -58,8 +65,9 @@ export function formatConversationMcp(
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.flatMap(
       (server, index) => [
-        `${offset + index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
+        `${offset + index + 1}. ${literal(server.name)} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
         `  - 详情：/mcp ${offset + index + 1}`,
+        "",
       ],
     ),
   ].join("\n"));
@@ -68,8 +76,13 @@ export function formatConversationMcp(
 export function formatConversationMcpHealth(
   result: Extract<ConversationCommandResult, { kind: "mcp-health" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
-  const report = result.report;
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
+  const report = { ...result.report,
+    actions: result.report.actions.map(action => ({ ...action, server: literal(action.server) })),
+    notices: result.report.notices.map(notice => ({ ...notice, server: literal(notice.server) })),
+  };
   const visibleActions = report.actions.slice(0, maximumMcpHealthFindings);
   const visibleNotices = report.notices.slice(
     0,
@@ -146,32 +159,35 @@ export function formatConversationMcpReload(
 export function formatConversationMcpDetail(
   result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
+  const commandLiteral = formatLiteral ?? ((value: string) => value);
   const server = result.server;
   const selector = result.selector;
   const detailSections = result.view
-    ? formatSelectedMcpDetailSection(server, result.view, selector)
+    ? formatSelectedMcpDetailSection(server, result.view, selector, literal, commandLiteral)
     : [
         ...formatMcpDetailEntries("工具", server.tools, (tool) =>
-          formatMcpToolLine(tool)
+          formatMcpToolLine(tool, literal)
         ),
         mcpToolAccessNotice,
         ...formatMcpDetailEntries("资源", server.resources, (resource) =>
-          `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
+          `- ${literal(resource.title ?? resource.name)} · ${commandLiteral(resource.uri)}${resource.mimeType ? ` · ${literal(formatMcpDescription(resource.mimeType))}` : ""}`
         ),
         ...formatMcpDetailEntries("资源模板", server.resourceTemplates, (template) =>
-          `- ${template.title ?? template.name} · ${template.uriTemplate}`
+          `- ${literal(template.title ?? template.name)} · ${commandLiteral(template.uriTemplate)}`
         ),
       ];
   return toStructuredMarkdownList([
-    `MCP Server：${server.serverTitle ?? server.name}`,
-    `名称：${server.name}`,
+    `MCP Server：${literal(server.serverTitle ?? server.name)}`,
+    `名称：${literal(server.name)}`,
     `运行：${formatMcpRuntimeStatus(server.runtimeStatus)}`,
-    ...(server.pluginId ? [`来源 Plugin：${server.pluginId}`] : []),
-    `版本：${server.serverVersion ?? "未提供"}`,
+    ...(server.pluginId ? [`来源 Plugin：${literal(server.pluginId)}`] : []),
+    `版本：${literal(server.serverVersion ?? "未提供")}`,
     `认证：${formatMcpAuthStatus(server.authStatus)}`,
     ...(server.serverDescription
-      ? [`说明：${formatMcpDescription(server.serverDescription)}`]
+      ? [`说明：${literal(formatMcpDescription(server.serverDescription))}`]
       : []),
     ...detailSections,
     "",
@@ -216,6 +232,8 @@ function formatSelectedMcpDetailSection(
   server: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"],
   view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
   selector: string,
+  literal: (value: string) => string,
+  commandLiteral: (value: string) => string,
 ): string[] {
   if (view.section === "tools") {
     return [
@@ -225,7 +243,8 @@ function formatSelectedMcpDetailSection(
         view,
         selector,
         (tool) => [tool.name, tool.title, tool.description],
-        formatMcpToolLine,
+        tool => formatMcpToolLine(tool, literal),
+        commandLiteral,
       ),
       mcpToolAccessNotice,
     ];
@@ -244,7 +263,8 @@ function formatSelectedMcpDetailSection(
         resource.mimeType,
       ],
       (resource) =>
-        `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`,
+        `- ${literal(resource.title ?? resource.name)} · ${commandLiteral(resource.uri)}${resource.mimeType ? ` · ${literal(formatMcpDescription(resource.mimeType))}` : ""}`,
+      commandLiteral,
     );
   }
   return formatMcpDetailPage(
@@ -259,7 +279,8 @@ function formatSelectedMcpDetailSection(
       template.uriTemplate,
       template.mimeType,
     ],
-    (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
+    (template) => `- ${literal(template.title ?? template.name)} · ${commandLiteral(template.uriTemplate)}`,
+    commandLiteral,
   );
 }
 
@@ -278,13 +299,14 @@ export function mcpDetailPageCount(result: Extract<ConversationCommandResult, { 
 
 function formatMcpToolLine(
   tool: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"]["tools"][number],
+  literal: (value: string) => string,
 ): string {
   const access = ({
     readOnly: "上游标记只读",
     writeCapable: "可能写入",
     unknown: "读写属性未知",
   } as const)[tool.access];
-  return `- ${tool.title ?? tool.name} · ${tool.name} · ${access}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`;
+  return `- ${literal(tool.title ?? tool.name)} · ${literal(tool.name)} · ${access}${tool.description ? ` · ${literal(formatMcpDescription(tool.description))}` : ""}`;
 }
 
 function formatMcpDetailPage<T>(
@@ -294,6 +316,7 @@ function formatMcpDetailPage<T>(
   selector: string,
   searchableValues: (entry: T) => ReadonlyArray<string | null>,
   format: (entry: T) => string,
+  literal: (value: string) => string,
 ): string[] {
   const normalizedSearch = view.searchTerm?.toLowerCase() ?? null;
   const matches = normalizedSearch
@@ -304,7 +327,7 @@ function formatMcpDetailPage<T>(
       )
     : [...entries];
   const pageCount = Math.max(1, Math.ceil(matches.length / maximumMcpDetailEntries));
-  const commandSuffix = view.searchTerm ? ` search ${view.searchTerm}` : "";
+  const commandSuffix = view.searchTerm ? ` search ${literal(view.searchTerm)}` : "";
   if (view.page > pageCount) {
     return [
       `${label}（${view.searchTerm ? `匹配 ${matches.length} · ` : ""}共 ${pageCount} 页）：`,
@@ -368,17 +391,19 @@ function formatMcpDescription(value: string): string {
 
 export function formatConversationMcpLogin(
   result: Extract<ConversationCommandResult, { kind: "mcp-login" }>,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
   if (result.login.type === "bearerToken") {
     return toStructuredMarkdownList([
       "MCP 认证",
-      `Server：${result.login.server}`,
+      `Server：${literal(result.login.server)}`,
       "状态：已使用 Bearer Token 认证，无需 OAuth 登录",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
     "MCP OAuth 登录已启动",
-    `Server：${result.login.server}`,
+    `Server：${literal(result.login.server)}`,
     `请在浏览器完成授权：${result.login.authorizationUrl}`,
     "授权完成后再次发送 /mcp 查看登录状态。",
   ].join("\n"));
@@ -386,17 +411,20 @@ export function formatConversationMcpLogin(
 
 export function formatConversationMcpResource(
   result: Extract<ConversationCommandResult, { kind: "mcp-resource" }>,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
+  const commandLiteral = formatLiteral ?? ((value: string) => value);
   const resource = result.resource;
   const heading = [
     "MCP Resource（外部不可信内容）",
-    `Server：${resource.server}`,
-    `请求 URI：${resource.requestedUri}`,
+    `Server：${literal(resource.server)}`,
+    `请求 URI：${commandLiteral(resource.requestedUri)}`,
   ];
   const blocks: string[] = [];
   let visibleContentCount = 0;
   for (const content of resource.contents) {
-    const block = formatMcpResourceContent(content, visibleContentCount);
+    const block = formatMcpResourceContent(content, visibleContentCount, literal, commandLiteral);
     const nextVisibleCount = visibleContentCount + 1;
     const omittedContentCount = resource.omittedContentCount
       + resource.contents.length
@@ -428,15 +456,17 @@ export function formatConversationMcpResource(
 function formatMcpResourceContent(
   content: McpResourceContent,
   index: number,
+  literal: (value: string) => string,
+  commandLiteral: (value: string) => string,
 ): string[] {
   if (content.kind === "blob") {
     return [
-      `内容 ${index + 1}：${content.uri}`,
-      `二进制内容未在渠道中展开 · MIME=${formatMcpDescription(content.mimeType ?? "未知")} · Base64 字符=${content.encodedCharacters}`,
+      `内容 ${index + 1}：${commandLiteral(content.uri)}`,
+      `二进制内容未在渠道中展开 · MIME=${literal(formatMcpDescription(content.mimeType ?? "未知"))} · Base64 字符=${content.encodedCharacters}`,
     ];
   }
   return [
-    `内容 ${index + 1}：${content.uri}${content.mimeType ? ` · ${formatMcpDescription(content.mimeType)}` : ""}`,
+    `内容 ${index + 1}：${commandLiteral(content.uri)}${content.mimeType ? ` · ${literal(formatMcpDescription(content.mimeType))}` : ""}`,
     "```text",
     escapeCodeFence(content.text),
     "```",
@@ -451,7 +481,10 @@ function escapeCodeFence(value: string): string {
 export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
+  const commandLiteral = formatLiteral ?? ((value: string) => value);
   const {
     plugins,
     selectors,
@@ -468,14 +501,14 @@ export function formatConversationPlugins(
   if (totalPluginCount === 0 && loadErrorCount === 0) {
     return "当前没有已安装的 Plugin。";
   }
-  const commandSuffix = searchTerm ? ` search ${searchTerm}` : "";
+  const commandSuffix = searchTerm ? ` search ${commandLiteral(searchTerm)}` : "";
   const hasReservedPluginName = plugins.some((plugin) =>
     plugin.name === "health" || plugin.name === "list"
   );
   const callableCommands = plugins.flatMap((plugin, index) => {
     const selector = selectors[index];
     return plugin.enabled && plugin.available && selector
-      ? [`${plugin.displayName}：/plugin ${selector} <任务>`]
+      ? [`${literal(plugin.displayName)}：/plugin ${selector} <任务>`]
       : [];
   });
   if (page > pageCount) {
@@ -490,7 +523,7 @@ export function formatConversationPlugins(
     return toStructuredMarkdownList([
       "已安装 Plugin（匹配 0 · 第 1/1 页）：",
       ...loadErrorNotice,
-      `没有匹配“${searchTerm}”的 Plugin。`,
+      `没有匹配“${literal(searchTerm)}”的 Plugin。`,
       queryOnly ? "重新搜索：/plugin list search 关键词" : "重新搜索：/plugin list search <关键词>",
     ].join("\n"));
   }
@@ -503,7 +536,7 @@ export function formatConversationPlugins(
         : plugin.enabled
           ? "已启用"
           : "未启用";
-      return `${selectors[index]}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
+      return `${selectors[index]}. ${literal(plugin.displayName)} · ${commandLiteral(plugin.id)} · ${status}${plugin.description ? ` · ${literal(plugin.description)}` : ""}\n`;
     }),
     "",
     ...(page > 1 ? [`上一页：/plugin list ${page - 1}${commandSuffix}`] : []),
@@ -523,7 +556,9 @@ export function formatConversationPlugins(
 
 export function formatConversationPluginHealth(
   result: Extract<ConversationCommandResult, { kind: "plugin-health" }>,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
   const { report } = result;
   const visibleIssues = report.issues.slice(0, 8);
   const lines = [
@@ -536,7 +571,7 @@ export function formatConversationPluginHealth(
       : []),
     ...(visibleIssues.length > 0 ? ["", "需要处理："] : []),
     ...visibleIssues.map((issue) =>
-      `${issue.plugin} · ${pluginHealthIssueLabel(issue.type, issue.reason)} · 详情：/plugin ${issue.selector}`
+      `${literal(issue.plugin)} · ${pluginHealthIssueLabel(issue.type, issue.reason)} · 详情：/plugin ${issue.selector}`
     ),
     ...(report.issues.length > visibleIssues.length
       ? [`其余 ${report.issues.length - visibleIssues.length} 项已省略，请使用 /plugin 分页查看。`]
@@ -559,33 +594,36 @@ function pluginHealthIssueLabel(
 export function formatConversationPluginDetail(
   result: Extract<ConversationCommandResult, { kind: "plugin-detail" }>,
   queryOnly = false,
+  formatLiteral?: (value: string) => string,
 ): string {
+  const literal = (value: string) => formatModelSettingLiteral(value, formatLiteral);
+  const commandLiteral = formatLiteral ?? ((value: string) => value);
   const plugin = result.plugin;
   return toStructuredMarkdownList([
-    `Plugin：${plugin.displayName}`,
-    `ID：${plugin.id}`,
-    `Marketplace：${plugin.marketplaceName}`,
+    `Plugin：${literal(plugin.displayName)}`,
+    `ID：${commandLiteral(plugin.id)}`,
+    `Marketplace：${literal(plugin.marketplaceName)}`,
     `状态：${pluginStatusLabel(plugin)}`,
-    ...(plugin.developerName ? [`开发者：${plugin.developerName}`] : []),
-    ...(plugin.category ? [`分类：${plugin.category}`] : []),
+    ...(plugin.developerName ? [`开发者：${literal(plugin.developerName)}`] : []),
+    ...(plugin.category ? [`分类：${literal(plugin.category)}`] : []),
     `来源：${pluginSourceLabel(plugin.source)}`,
-    `远端版本：${plugin.version ?? "未提供"}`,
-    `本地版本：${plugin.localVersion ?? "未提供"}`,
+    `远端版本：${literal(plugin.version ?? "未提供")}`,
+    `本地版本：${literal(plugin.localVersion ?? "未提供")}`,
     `安装时间：${formatPluginInstalledAt(plugin.installedAt)}`,
     `认证时机：${pluginAuthPolicyLabel(plugin.authPolicy)}`,
     ...(plugin.capabilities.length > 0
-      ? [`能力：${formatPluginValues(plugin.capabilities)}`]
+      ? [`能力：${literal(formatPluginValues(plugin.capabilities))}`]
       : []),
     ...(plugin.disabledReason
       ? [`不可用原因：${pluginDisabledReasonLabel(plugin.disabledReason)}`]
       : []),
     ...(plugin.eligiblePlanTypes.length > 0
-      ? [`适用套餐（上游标识）：${formatPluginValues(plugin.eligiblePlanTypes)}`]
+      ? [`适用套餐（上游标识）：${literal(formatPluginValues(plugin.eligiblePlanTypes))}`]
       : []),
-    ...(plugin.description ? [`说明：${plugin.description}`] : []),
+    ...(plugin.description ? [`说明：${literal(plugin.description)}`] : []),
     "",
     ...(queryOnly ? [] : [plugin.enabled && plugin.available
-      ? `调用：/plugin ${plugin.id} <任务>`
+      ? `调用：${commandLiteral(`/plugin ${plugin.id} <任务>`)}`
       : "当前 Plugin 不可调用。"]),
   ].join("\n"));
 }

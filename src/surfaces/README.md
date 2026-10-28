@@ -275,6 +275,7 @@ Workspace/状态与操作结果分派隔离。它们统一四渠道已支持入�
 `conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享命令文案；模型面板通过
 `formatConversationModelState` 共享当前/待生效字段、切换后果及下一步提示，渠道自行处理按钮与分页。
 工作区、会话和模型元数据单行化后，由渠道传入的字面格式回调处理；Telegram 保留原值到 HTML 边界。
+扩展和计划任务展示元数据同样经过单行化及渠道字面回调；可复制命令中的搜索词、Plugin ID 和 MCP URI 保留原始值，只做渠道转义。OAuth URL 与资源正文保持各自原处理路径。计划任务文字列表和运行页提供原管理命令，确认页明确展示任务摘要及返回列表不撤销确认码的含义。
 `conversation-hook-command-format.ts` 只接收 Application 的 Hook 展示快照，集中生成纯文本列表、详情、
 持久配置确认文案和合法操作选项；原样使用 Application 选择标识与确认令牌，不展示内部 Key 或哈希。
 向组合根公开共享文案的保真检查并接收窄文字保真能力；组合根显式组合飞书、Telegram 与微信策略，未知渠道拒绝审查。Application 在列表、预览与确认时复核；微信格式中和会改变审查字段时拒绝信任。结果区分共享配置保存和实例刷新未确认。

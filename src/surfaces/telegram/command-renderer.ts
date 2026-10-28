@@ -170,7 +170,8 @@ export function hookKeyboard(
 ): InlineKeyboardMarkup {
   return {
     inline_keyboard: hookCommandChoices(result.view).map(choice => [{
-      text: choice.label,
+      text: boundedButtonLabel(!result.view.detail && !result.view.updated && result.view.entries.some(entry => entry.selector === choice.input)
+        ? `${choice.input.split(".").at(-1)} ${choice.label}` : choice.label),
       callback_data: `hooks:${choice.input.replace(" ", ":")}`,
     }]),
   };
@@ -313,7 +314,7 @@ export function scheduledTaskConfirmationKeyboard(
         text: "确认",
         callback_data: `schedule:confirm:${result.preview.token}`,
       },
-      { text: "取消", callback_data: "schedule:cancel" },
+      { text: "返回列表", callback_data: "schedule:cancel" },
     ]],
   };
 }
@@ -505,10 +506,11 @@ export async function replyTelegramPanel(
   replyMarkup?: InlineKeyboardMarkup,
   reply: Context["reply"] = context.reply.bind(context),
 ): Promise<void> {
-  for (const [index, chunk] of formatTelegramPanelChunks(text).entries()) {
+  const chunks = formatTelegramPanelChunks(text);
+  for (const [index, chunk] of chunks.entries()) {
     await reply(chunk, {
       parse_mode: "HTML",
-      ...(index === 0 && replyMarkup
+      ...(index === chunks.length - 1 && replyMarkup
         ? { reply_markup: replyMarkup }
         : {}),
       ...(index === 0 ? {} : { disable_notification: true }),
