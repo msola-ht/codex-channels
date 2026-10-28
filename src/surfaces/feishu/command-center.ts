@@ -707,45 +707,50 @@ function renderFeishuCategorizedCommandsCard(
   token: string,
 ): FeishuCardDocument {
   return feishuCardShell("blue", "更多 Codex 命令", [
-    sectionTitle("会话查询"),
+    sectionTitle("会话管理"),
     actionRow(token, [
-      menuAction("sessions", "primary"),
+      menuAction("sessions"),
       menuAction("archived"),
     ]),
-    sectionTitle("会话操作"),
     actionRow(token, [
-      menuAction("stop"),
       menuAction("archive"),
-      menuAction("compact"),
-    ]),
-    actionRow(token, [
-      menuAction("fork"),
       menuAction("rename"),
-      menuAction("queue"),
-      menuAction("release"),
+      menuAction("fork"),
     ]),
     actionRow(token, [
       menuAction("pin"),
       menuAction("unpin"),
+      menuAction("compact"),
+    ]),
+    sectionTitle("任务工具"),
+    actionRow(token, [
+      menuAction("goal"),
+      menuAction("plan", "切换 Plan 模式"),
+      menuAction("schedule"),
+    ]),
+    actionRow(token, [
+      menuAction("queue", "原生队列"),
       menuAction("revert"),
     ]),
     actionRow(token, [
-      menuAction("schedule"),
+      menuAction("diff"),
+      menuAction("review"),
     ]),
     sectionTitle("能力与集成"),
     actionRow(token, [
       menuAction("agents"),
       menuAction("skill"),
       menuAction("mcp"),
+    ]),
+    actionRow(token, [
       menuAction("plugin"),
       menuAction("hooks"),
     ]),
-    sectionTitle("当前内容"),
+    sectionTitle("权限与诊断"),
     actionRow(token, [
       menuAction("autoreview"),
       menuAction("permissions"),
-      menuAction("diff"),
-      menuAction("review"),
+      menuAction("release"),
     ]),
     sectionTitle("飞书"),
     actionRow(token, [
@@ -753,7 +758,7 @@ function renderFeishuCategorizedCommandsCard(
       ["飞书状态", "feishu-status", "default"],
       ["Doctor", "feishu-doctor", "default"],
     ]),
-    feishuCardPlainText("带文本参数的命令将在下一步打开输入卡片。"),
+    feishuCardPlainText("重命名、Review 和 Goal 打开输入或选项；点击“切换 Plan 模式”会直接请求切换。发送 /help 返回命令中心。"),
   ]);
 }
 
@@ -762,41 +767,41 @@ export function renderFeishuCommandCenterCard(
 ): FeishuCardDocument {
   return feishuCardShell("blue", "Codex 命令中心", [
     feishuCardPlainText("选择操作；普通文本仍会发送到当前 Codex Session。"),
-    sectionTitle("常用"),
+    sectionTitle("当前任务"),
     actionRow(token, [
-      menuAction("new", "primary"),
-      menuAction("resume"),
       menuAction("status"),
+      menuAction("stop"),
+      menuAction("new"),
     ]),
+    sectionTitle("会话与工作区"),
     actionRow(token, [
-      menuAction("fast", "primary"),
-      menuAction("usage"),
-      menuAction("metrics"),
-      menuAction("limits"),
-    ]),
-    sectionTitle("模型与工作区"),
-    actionRow(token, [
-      menuAction("model"),
-      menuAction("effort"),
+      menuAction("resume", "恢复会话"),
       menuAction("workspace"),
     ]),
+    sectionTitle("模型设置"),
     actionRow(token, [
-      menuAction("goal"),
-      menuAction("plan"),
-      menuAction("schedule"),
+      menuAction("model", "选择模型"),
+      menuAction("effort"),
+      menuAction("fast", "Fast"),
+    ]),
+    sectionTitle("用量与账户"),
+    actionRow(token, [
+      menuAction("usage"),
+      menuAction("metrics"),
+      menuAction("limits", "账户额度"),
     ]),
     sectionTitle("更多"),
     actionRow(token, [
-      ["帮助与更多命令", "help", "default"],
+      ["更多操作", "help", "default"],
     ]),
   ]);
 }
 
 /** Static canonical entries only; forms, navigation and allowed selections remain card-owned. */
-function menuAction(command: ConversationCommandName, type: "primary" | "default" = "default"):
-  readonly [string, ConversationCommandName, "primary" | "default"] {
+function menuAction(command: ConversationCommandName, label?: string):
+  readonly [string, ConversationCommandName, "default"] {
   const entry = conversationMenuAction(command);
-  return [entry.label, entry.command, type];
+  return [label ?? entry.label, entry.command, "default"];
 }
 
 function sectionTitle(title: string): Record<string, unknown> {
