@@ -520,7 +520,11 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "plugin" && result.kind === "plugins") {
-    const callable = result.plugins.filter((plugin) =>
+    const entries = result.plugins.map((plugin, index) => ({
+      plugin,
+      selector: result.selectors[index] ?? "?",
+    }));
+    const callable = entries.filter(({ plugin }) =>
       plugin.enabled && plugin.available
     );
     const searchSuffix = result.searchTerm ? ` search ${result.searchTerm}` : "";
@@ -540,15 +544,37 @@ export function renderCommandCenterChoices(
           }]
         : []),
     ];
-    if (callable.length === 0 && navigation.length === 0) {
-      return undefined;
-    }
     return {
       title: `选择 Plugin · 第 ${result.page}/${result.pageCount} 页`,
-      description: "仅显示当前页已启用且可调用的 Plugin，可继续翻页。",
+      description: [
+        `共 ${result.totalPluginCount} 项 · 匹配 ${result.matchedPluginCount} 项`,
+        ...(result.searchTerm ? [`搜索：${choiceCardLiteral(result.searchTerm)}`] : []),
+        ...(result.loadErrorCount > 0
+          ? ["", `注意：${result.loadErrorCount} 个 Plugin Marketplace 加载失败，列表可能不完整。`]
+          : []),
+        "",
+        ...(result.page > result.pageCount
+          ? ["当前页面已不存在，请通过 /plugin list 重新查看。", ""]
+          : entries.length === 0
+          ? [result.searchTerm
+              ? "没有匹配的 Plugin。"
+              : result.loadErrorCount > 0 ? "本次未取得 Plugin 列表。" : "当前没有已安装的 Plugin。", ""]
+          : entries.flatMap(({ plugin, selector }) => [
+              `**${selector}. ${choiceCardLiteral(plugin.displayName, 32)}** · ${plugin.enabled ? "已启用" : "未启用"} · ${plugin.available ? "可用" : "不可用"}`,
+              "",
+              ...(plugin.description ? [choiceCardLiteral(plugin.description, 160), ""] : []),
+            ])),
+        ...(callable.length > 0
+          ? ["仅已启用且可用的条目提供按钮；选择后填写任务，再提交调用。"]
+          : entries.length > 0 ? ["本页没有可调用的 Plugin。"] : []),
+        "健康检查：/plugin health",
+        "搜索：/plugin list search <关键词>",
+        "详情：/plugin <名称、完整 ID 或序号>",
+      ].join("\n"),
+      descriptionFormat: "lark_md",
       choices: [
-        ...callable.map((plugin) => ({
-          label: `${plugin.displayName} · ${plugin.id}`,
+        ...callable.map(({ plugin, selector }) => ({
+          label: choiceButtonLabel(`${selector} · ${formatModelSettingLiteral(plugin.displayName)}`),
           action: "plugin" as const,
           input: plugin.id,
         })),
