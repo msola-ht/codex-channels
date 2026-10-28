@@ -202,7 +202,7 @@ export type ConversationCommandResult =
       view: "diff";
       artifacts: ReturnType<ConversationCommandUseCases["artifacts"]>;
     }
-  | { kind: "goal"; goal: ThreadGoal | null }
+  | { kind: "goal"; threadId: string; goal: ThreadGoal | null }
   | { kind: "agents"; roles: Awaited<ReturnType<ConversationCommandUseCases["listAgentRoles"]>> }
   | {
       kind: "occupancy";
@@ -1206,8 +1206,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "Goal 参数无效",
       );
     }
-    const goal = await this.conversations.getGoal(target, assertAuthorized);
-    return { kind: "goal", goal };
+    const result = await this.conversations.getGoal(target, assertAuthorized);
+    return { kind: "goal", ...result };
   }
 }
 

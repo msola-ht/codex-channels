@@ -254,7 +254,7 @@ export interface ConversationTurnUseCases {
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
   startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null>;
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }>;
   setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
   clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
 }
@@ -1728,10 +1728,11 @@ export class ConversationService implements
     return this.extensionQueries.listPermissionProfiles(target, assertAuthorized);
   }
 
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      return this.codex.getGoal(binding.threadId, beforeSubmit);
+      const goal = await this.codex.getGoal(binding.threadId, beforeSubmit);
+      return { threadId: binding.threadId, goal };
     });
   }
 

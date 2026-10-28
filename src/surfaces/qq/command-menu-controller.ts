@@ -362,8 +362,8 @@ export class QqCommandMenuController {
   }
 
   private goal(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "goal" }>): QqMenuPanel {
-    const threadId = this.options.readyThread(context.target);
-    if (!threadId || result.goal && result.goal.threadId !== threadId) throw expired();
+    const { threadId } = result;
+    if (this.options.readyThread(context.target) !== threadId || result.goal && result.goal.threadId !== threadId) throw expired();
     const buttons = result.goal ? [this.button(context, "清除当前目标", { kind: "goal-clear", threadId }), homeButton()] : [homeButton()];
     const detail = result.goal ? renderConversationCommandResult(result)! : "当前会话没有 Goal。";
     const panel = this.panel(context, { content: "QQ 当前支持查询和清除目标；清除不等于停止当前任务。", keyboard: { content: { rows: [{ buttons }] } } });

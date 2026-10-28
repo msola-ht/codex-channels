@@ -44,6 +44,7 @@ import { formatConversationScheduledConfirmation } from "../conversation-schedul
 import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -782,7 +783,7 @@ export class TelegramSurface {
             "模型列表已变化，请重新发送 /model 选择",
           );
         }
-        const selected = state.models[Number(context.match[1]) - 1];
+        const selected = createModelSelectionPresentation(state).entries[Number(context.match[1]) - 1]?.model;
         if (!selected || selected.available === false) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -1672,6 +1673,9 @@ export class TelegramSurface {
     // scope, including browse-only changes. Status refreshes also carry it.
     if (result.kind === "models") scope = { ...scope, selectionScope: result.state.selectionScope,
       threadId: this.service.status(inputTarget).threadId };
+    // Reading Goal may create the first Thread. Keep its authoritative source
+    // instead of treating that preparation as an unrelated binding change.
+    if (result.kind === "goal") scope = { ...scope, threadId: result.threadId };
     if (result.kind === "status") {
       if (result.status.workspaceId !== scope.workspaceId || result.status.cwd !== scope.cwd || result.status.threadId !== scope.threadId) {
         throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
