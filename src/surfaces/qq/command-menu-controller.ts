@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
   fastServiceTierId,
-  listProviders,
   modelSelectionSnapshot,
   parseThreadRevertOperation,
   parseMcpOperation,
@@ -17,6 +16,7 @@ import { formatConversationModelState } from "../conversation-model-account-comm
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 import { cloudUsageChoices } from "../cloud-usage-format.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
@@ -713,8 +713,8 @@ export class QqCommandMenuController {
     const snapshot = modelSelectionSnapshot(state);
     if (this.options.selectionScope(context.target) !== snapshot.selectionScope) throw expired();
     context = { ...context, selectionScope: snapshot.selectionScope };
-    const selected = state.models.find(model => model.model === state.model
-      && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
+    const presentation = createModelSelectionPresentation(state);
+    const selected = presentation.availableCurrentModel;
     const [modelLine, ...settingLines] = formatConversationModelState(result, value => markdown(value, 140));
     const current = `**${modelLine}**\n\n${settingLines.map(line => `- ${line}`).join("\n")}\n`;
     if (view !== "model") {
@@ -724,11 +724,9 @@ export class QqCommandMenuController {
           label: `${option.effort === (state.effort ?? selected?.defaultReasoningEffort) ? "当前 " : ""}${formatReasoningEffort(option.effort)}`,
           selection: { kind: "effort", effort: option.effort, snapshot },
         }))
-        : [
-          { label: "Standard", selection: { kind: "fast", mode: "off", snapshot } },
-          ...(selected && fastServiceTierId(selected) ? [{ label: "Fast", selection: { kind: "fast" as const, mode: "on" as const, snapshot } }] : []),
-          ...(selected && ultrafastServiceTierId(selected) ? [{ label: "Ultrafast", selection: { kind: "fast" as const, mode: "ultrafast" as const, snapshot } }] : []),
-        ];
+        : presentation.speedOptions.map(({ label, mode }) => ({
+          label, selection: { kind: "fast", mode, snapshot },
+        }));
       const speed = state.serviceTierKnown ? formatServiceTier(state.serviceTier, selected) : undefined;
       const layout = choiceLayout(choices.map(choice => view === "fast" && choice.label === speed ? `${choice.label} ← 当前` : choice.label));
       const entries = slicePage(choices, page, layout.pageSize).map(choice => ({ ...choice,
@@ -745,25 +743,25 @@ export class QqCommandMenuController {
         buttons, page, Math.ceil(choices.length / layout.pageSize), next => ({ kind: "model-page", page: next, view, snapshot }), extra, layout.columns);
     }
     if (state.providerFilter === undefined) {
-      const providers = listProviders(state.models);
-      const layout = choiceLayout(providers.map(formatCodexProviderLabel));
+      const providers = presentation.providers;
+      const layout = choiceLayout(providers.map(provider => formatCodexProviderLabel(provider.id)));
       const entries = slicePage(providers, page, layout.pageSize);
-      const buttons = entries.map(provider => this.button(context, formatCodexProviderLabel(provider), {
+      const buttons = entries.map(({ id: provider }) => this.button(context, formatCodexProviderLabel(provider), {
         kind: "model", selection: { kind: "browse-provider", provider, snapshot },
       }, QQ_BUTTON_LABEL_CHARACTERS));
-      const lines = [current, "### 提供商列表\n", ...entries.map((provider, index) =>
-        `${(page - 1) * layout.pageSize + index + 1}. ${markdown(formatCodexProviderLabel(provider), 100)}${provider === (state.modelProvider ?? "openai") ? " ← 当前" : ""} · ${markdown(formatProviderModelSummary(state.models, provider), 180)}`), "\n点击下方提供商，继续选择模型。"];
+      const lines = [current, "### 提供商列表\n", ...entries.map(({ id: provider, position, isCurrent }) =>
+        `${position}. ${markdown(formatCodexProviderLabel(provider), 100)}${isCurrent ? " ← 当前" : ""} · ${markdown(formatProviderModelSummary(state.models, provider), 180)}`), "\n点击下方提供商，继续选择模型。"];
       return this.listPanel(context, "选择提供商", lines, buttons, page, Math.ceil(providers.length / layout.pageSize),
         next => ({ kind: "model-page", page: next, view, snapshot }), [], layout.columns);
     }
-    const catalog = state.models.filter(model => (model.provider ?? "openai") === state.providerFilter);
-    const labels = catalog.map((model, index) => `${index + 1} ${modelListEntry(model.displayName, model.provider, model.model).modelName}`);
+    const catalog = presentation.entries;
+    const labels = catalog.map(({ model, position }) => `${position} ${modelListEntry(model.displayName, model.provider, model.model).modelName}`);
     const layout = choiceLayout(labels);
     const entries = slicePage(catalog, page, layout.pageSize);
-    const buttons = entries.flatMap((model, index) => model.available === false ? [] : [this.button(context, labels[(page - 1) * layout.pageSize + index]!, {
-      kind: "model", selection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
+    const buttons = entries.flatMap(({ model, provider }, index) => model.available === false ? [] : [this.button(context, labels[(page - 1) * layout.pageSize + index]!, {
+      kind: "model", selection: { kind: "model", provider, model: model.model, snapshot },
     }, QQ_BUTTON_LABEL_CHARACTERS)]);
-    const lines = [current, `**浏览提供商：${markdown(formatCodexProviderLabel(state.providerFilter), 100)}**\n`, ...entries.map((model, index) => `${(page - 1) * layout.pageSize + index + 1}. ${markdown(modelListEntry(model.displayName, model.provider, model.model).name, 130)}${model.available === false ? "（暂不可用）" : ""}${model === selected ? " ← 当前" : ""} · ${formatModelSpeedSupport(model)}`), "\n点击下方模型完成选择，再调整该模型的思考等级和速度；上方当前设置不会因浏览而切换。"];
+    const lines = [current, `**浏览提供商：${markdown(formatCodexProviderLabel(state.providerFilter), 100)}**\n`, ...entries.map(({ model, position }) => `${position}. ${markdown(modelListEntry(model.displayName, model.provider, model.model).name, 130)}${model.available === false ? "（暂不可用）" : ""}${model === selected ? " ← 当前" : ""} · ${formatModelSpeedSupport(model)}`), "\n点击下方模型完成选择，再调整该模型的思考等级和速度；上方当前设置不会因浏览而切换。"];
     const extra: QqMenuButton[] = [qqMenuButton("providers", "返回提供商", "/model")];
     if (selected && selected.supportedReasoningEfforts.length > 1) extra.push(this.button(context, "思考等级", { kind: "model-page", page: 1, view: "effort", snapshot }));
     if (selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));

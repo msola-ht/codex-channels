@@ -1,7 +1,4 @@
 import {
-  fastServiceTierId,
-  ultrafastServiceTierId,
-  listProviders,
   modelSelectionSnapshot,
   type ConversationCommandResult,
 } from "../../application/index.js";
@@ -34,6 +31,7 @@ import { escapeFeishuCardMarkdown } from "./message-content.js";
 import { renderFeishuCommandResult } from "./renderer.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
 import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 
 const feishuQueueChoiceChunkSize = 13;
 
@@ -648,19 +646,14 @@ export function renderCommandCenterChoices(
     return undefined;
   }
   const snapshot = modelSelectionSnapshot(result.state);
-  const currentModel = result.state.models.find(
-    (model) =>
-      model.available !== false && model.model === result.state.model
-      && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
-  );
+  const presentation = createModelSelectionPresentation(result.state);
+  const currentModel = presentation.availableCurrentModel;
   const settingLines = formatConversationModelState(result, escapeFeishuCardMarkdown).map(line => `- ${line}`);
   if (action === "model") {
     if (result.state.models.length === 0) {
       return undefined;
     }
     if (result.state.providerFilter === undefined) {
-      const providers = listProviders(result.state.models);
-      const current = result.state.modelProvider ?? "openai";
       return {
         title: "选择提供商",
         description: [
@@ -670,8 +663,8 @@ export function renderCommandCenterChoices(
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
         descriptionFormat: "markdown",
-        choices: providers.map((provider) => ({
-          label: `${provider === current ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))} · ${formatProviderModelSummary(result.state.models, provider)}`,
+        choices: presentation.providers.map(({ id: provider, isCurrent }) => ({
+          label: `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))} · ${formatProviderModelSummary(result.state.models, provider)}`,
           action: "model",
           input: provider,
           modelSelection: { kind: "browse-provider", provider, snapshot },
@@ -688,14 +681,12 @@ export function renderCommandCenterChoices(
         "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。",
       ].join("\n"),
       descriptionFormat: "markdown",
-      choices: result.state.models
-        .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
-        .map((model, index) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, index + 1))}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
+      choices: presentation.entries.map(({ model, provider, position, isCurrent }) => ({
+        label: `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
-        input: String(index + 1),
-        modelSelection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
-        })),
+        input: String(position),
+        modelSelection: { kind: "model", provider, model: model.model, snapshot },
+      })),
     };
   }
   if (action === "effort") {
@@ -727,26 +718,12 @@ export function renderCommandCenterChoices(
       title: "切换速度",
       description: [...settingLines, `- 当前模型：${formatModelSpeedSupport(currentModel)}`].join("\n"),
       descriptionFormat: "markdown",
-      choices: [
-        {
-          label: `${speed === "Standard" ? "✓ " : ""}Standard`,
-          action: "fast",
-          input: "off",
-          modelSelection: { kind: "fast", mode: "off", snapshot },
-        },
-        ...(currentModel && fastServiceTierId(currentModel) ? [{
-          label: `${speed === "Fast" ? "✓ " : ""}Fast`,
-          action: "fast",
-          input: "on",
-          modelSelection: { kind: "fast", mode: "on", snapshot },
-        } as const] : []),
-        ...(currentModel && ultrafastServiceTierId(currentModel) ? [{
-          label: `${speed === "Ultrafast" ? "✓ " : ""}Ultrafast`,
-          action: "fast",
-          input: "ultrafast",
-          modelSelection: { kind: "fast", mode: "ultrafast", snapshot },
-        } as const] : []),
-      ],
+      choices: presentation.speedOptions.map(({ label, mode }) => ({
+        label: `${speed === label ? "✓ " : ""}${label}`,
+        action: "fast",
+        input: mode,
+        modelSelection: { kind: "fast", mode, snapshot },
+      })),
     };
   }
   return undefined;

@@ -7,14 +7,12 @@ import type {
   ConversationCommandResult,
   ModelSelectionState,
 } from "../../application/index.js";
-import {
-  listProviders,
-} from "../../application/index.js";
 import { formatCodexProviderLabel, formatProviderModelSummary, modelListDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { createWorkspaceSelectionPresentation } from "../workspace-selection-presentation.js";
+import { createModelSelectionPresentation } from "../model-selection-presentation.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatConversationPlugins,
@@ -209,9 +207,7 @@ export function modelEffortKeyboard(
   if (result.view !== "effort") {
     return undefined;
   }
-  const model = result.state.models.find((candidate) =>
-    candidate.model === result.state.model
-    && (candidate.provider ?? "openai") === (result.state.modelProvider ?? "openai"));
+  const model = createModelSelectionPresentation(result.state).matchingCurrentModel;
   if (!model || model.supportedReasoningEfforts.length <= 1) {
     return undefined;
   }
@@ -227,8 +223,7 @@ export function modelEffortKeyboard(
 function modelProviderSelectionText(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
 ): string {
-  const providers = listProviders(result.state.models);
-  const current = result.state.modelProvider ?? "openai";
+  const { providers } = createModelSelectionPresentation(result.state);
   return toStructuredMarkdownList([
     "## 选择提供商",
     ...formatConversationModelState(result).map(line => `- ${line}`),
@@ -236,8 +231,8 @@ function modelProviderSelectionText(
     ...(providers.length > 0 ? ["提供商列表："] : [
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ]),
-    ...providers.map((provider, index) =>
-      `${index + 1}. ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
+    ...providers.map(({ id, position, isCurrent }) =>
+      `${position}. ${formatModelSettingLiteral(formatCodexProviderLabel(id))}${isCurrent ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, id)}`),
     "",
     ...(providers.length > 0
       ? ["请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。"]
@@ -256,15 +251,14 @@ export function modelProviderSelectionKeyboard(
   ) {
     return undefined;
   }
-  const providers = listProviders(result.state.models);
-  const current = result.state.modelProvider ?? "openai";
+  const { providers } = createModelSelectionPresentation(result.state);
   const token = telegramModelSelectionToken(result.state, actorId);
   return {
-    inline_keyboard: providers.map((provider, index) => [{
+    inline_keyboard: providers.map(({ id, position, isCurrent }) => [{
       text: boundedButtonLabel(
-        `${provider === current ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`,
+        `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(id))}`,
       ),
-      callback_data: `mp:${index + 1}:${token}`,
+      callback_data: `mp:${position}:${token}`,
     }]),
   };
 }
@@ -273,21 +267,17 @@ export function modelSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
   actorId = "",
 ): InlineKeyboardMarkup | undefined {
-  const models = result.state.providerFilter === undefined
-    ? result.state.models
-    : result.state.models.filter(
-        (model) => (model.provider ?? "openai") === result.state.providerFilter,
-      );
-  if (result.view !== "model" || models.length === 0) {
+  const { entries } = createModelSelectionPresentation(result.state);
+  if (result.view !== "model" || entries.length === 0) {
     return undefined;
   }
   const token = telegramModelSelectionToken(result.state, actorId);
   return {
-    inline_keyboard: models.map((model, index) => [{
+    inline_keyboard: entries.map(({ model, position, isCurrent }) => [{
       text: boundedButtonLabel(
-        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, index + 1))}${model.available === false ? "（暂不可用）" : ""}`,
+        `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}${model.available === false ? "（暂不可用）" : ""}`,
       ),
-      callback_data: `ms:${index + 1}:${token}`,
+      callback_data: `ms:${position}:${token}`,
     }]),
   };
 }

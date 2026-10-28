@@ -256,6 +256,9 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `workspace-selection-presentation.ts` 从 Application 工作区列表生成原始 ID、名称、目录、原顺序编号和当前项标记，
 供共享文字格式器、Telegram 键盘、飞书选择卡和 QQ 工作区分页消费。渠道继续负责转义、截断、分页、按钮编码与交互有效性；
 投影不重新解释文字选择、不变更列表顺序、不查询或写入工作区状态。执行仍走原 Application 文字或精确 ID 入口。
+`model-selection-presentation.ts` 统一模型菜单的 Provider 顺序、浏览范围内的原始模型条目和位置、当前身份及速度候选项。
+匹配当前身份的目录项与可用当前模型分开返回，保留各渠道对不可用项和默认思考等级的既有显示差异。
+它不构造交互快照、令牌或执行请求，不修改 Provider 浏览状态；渠道继续拥有分页、字面格式、选项准入及回调，Application 仍校验选择与提交。
 纯格式化实现分别位于
 `conversation-command-help.ts`、`conversation-session-command-format.ts`、
 `conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、
