@@ -569,8 +569,14 @@ export class TelegramSurface {
   }
 
   private registerHandlers(): void {
+    const commandNames = (name: string): string[] => [
+      telegramConversationCommandName(name),
+      ...Object.entries(surfaceCommandAliases)
+        .filter(([, command]) => command === name)
+        .map(([alias]) => telegramConversationCommandName(alias)),
+    ];
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
-    this.bot.command(["start", "help", "h"], (context) =>
+    this.bot.command(["start", ...commandNames("help")], (context) =>
       replyTelegramPanel(
         context,
         [
@@ -592,14 +598,10 @@ export class TelegramSurface {
     for (const command of conversationCommandNames.filter(
       (candidate) => candidate !== "stop",
     )) {
-      this.bot.command(telegramConversationCommandName(command), (context) =>
+      this.bot.command(commandNames(command), (context) =>
         this.executeCommand(context, command));
     }
-    this.bot.command("work", (context) =>
-      this.executeCommand(context, surfaceCommandAliases.work));
-    this.bot.command("r", (context) =>
-      this.executeCommand(context, surfaceCommandAliases.r));
-    this.bot.command("stop", async (context) => {
+    this.bot.command(commandNames("stop"), async (context) => {
       const cancelledInteraction = this.interactions.stopForChat(String(context.chat.id));
       await this.executeCommand(context, "stop");
       if (cancelledInteraction) await context.reply(interactionStoppedText);

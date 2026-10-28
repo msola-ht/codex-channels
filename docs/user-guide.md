@@ -966,6 +966,8 @@ codexc uninstall
 - 帮助：`/help`、`/whoami`
 
 `/sessions search <关键词>` 匹配会话标题，不检索消息正文。
+飞书“搜索会话”和“搜索已归档会话”表单同样按标题搜索，数字及 `filter`、`provider`、`search` 开头的输入均作为搜索词，不解释为页码或筛选选项。
+渠道命令共用 `/h → /help`、`/work → /workspace`、`/r → /resume` 和 `/skills → /skill` 别名，Telegram 也支持这些别名及其原命令参数。
 飞书“释放占用”按钮执行只读 `/release`，不停止当前 Turn，也不直接结束进程。
 `/release force` 仅在诊断识别出可释放的 Codex 进程、发送信号前复核通过后尝试结束该进程；
 若持锁方是共享 App Server，会影响该进程上的其他会话，不能当作当前会话的 `/stop` 使用。

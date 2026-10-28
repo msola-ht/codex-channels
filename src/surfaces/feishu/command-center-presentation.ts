@@ -265,20 +265,22 @@ export function renderCommandCenterForm(
     return {
       kind: "form",
       title: "搜索会话",
-      description: "按会话名称、预览或 Session ID 搜索。",
+      description: "按会话标题搜索；输入内容均作为搜索词。",
       action: "sessions",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
+      inputPrefix: "search ",
     };
   }
   if (action === "archived-search") {
     return {
       kind: "form",
       title: "搜索已归档会话",
-      description: "按会话名称、预览或 Session ID 搜索。",
+      description: "按会话标题搜索；输入内容均作为搜索词。",
       action: "archived",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
+      inputPrefix: "search ",
     };
   }
   if (action === "rename") {
