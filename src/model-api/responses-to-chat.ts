@@ -294,6 +294,8 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
     const tool = object(raw);
     if (tool.type !== "function" && tool.type !== "custom") throw new ModelConversionError("Unsupported discovered tool type");
     const name = string(tool.name);
+    // Search history is readable without granting tools to this model round.
+    if (toolNames.get(toolSearchName)?.kind !== "tool_search" || source.tool_choice === "none") return;
     const identity = toolNames.get(chatToolName(name, namespace));
     if (identity) {
       if (identity.name !== name || identity.namespace !== namespace || identity.kind !== tool.type) {
@@ -317,23 +319,45 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
     addDiscovered(tool);
   }
   if (tools.length > 0) result.tools = tools;
+  const namedChoice = (choice: JsonObject): JsonObject | undefined => {
+    const type = string(choice.type);
+    if (type === "function" || type === "custom") {
+      const originalName = string(choice.name), namespace = choice.namespace == null ? undefined : string(choice.namespace);
+      const name = chatToolName(originalName, namespace), identity = toolNames.get(name);
+      if (identity?.kind !== type || identity.name !== originalName || identity.namespace !== namespace
+        || Object.keys(choice).some(key => !["type", "name", "namespace"].includes(key))) {
+        throw new ModelConversionError("Invalid named tool choice");
+      }
+      return { type: "function", function: { name } };
+    }
+    const name = type === "tool_search" && toolNames.get(toolSearchName)?.kind === "tool_search" ? toolSearchName
+      : type === "web_search" && options.clineWebSearch ? webSearch?.name : undefined;
+    if (type === "web_search" && options.clineWebSearch && name === undefined) throw new ModelConversionError("Invalid hosted web search choice");
+    if (name !== undefined) {
+      if (Object.keys(choice).some(key => key !== "type")) throw new ModelConversionError("Invalid named tool choice");
+      return { type: "function", function: { name } };
+    }
+    return undefined;
+  };
   if (source.tool_choice !== undefined) {
     if (typeof source.tool_choice === "string" && ["auto", "none", "required"].includes(source.tool_choice)) result.tool_choice = source.tool_choice;
     else {
       const choice = object(source.tool_choice);
       const type = string(choice.type);
-      if (type === "function" || type === "custom") {
-        const name = chatToolName(string(choice.name), choice.namespace == null ? undefined : string(choice.namespace));
-        if (toolNames.get(name)?.kind === "web_search") throw new ModelConversionError("Invalid hosted web search choice");
-        result.tool_choice = { type: "function", function: { name } };
-      } else if (type === "tool_search" && toolNames.get(toolSearchName)?.kind === "tool_search") {
-        result.tool_choice = { type: "function", function: { name: toolSearchName } };
-      } else if (type === "web_search" && options.clineWebSearch) {
-        if (!webSearch || Object.keys(choice).some(key => key !== "type")) throw new ModelConversionError("Invalid hosted web search choice");
-        result.tool_choice = { type: "function", function: { name: webSearch.name } };
-      } else {
-        result.tool_choice = choice;
-      }
+      if (type === "allowed_tools") {
+        if (Object.keys(choice).some(key => !["type", "mode", "tools"].includes(key)) || !["auto", "required"].includes(string(choice.mode))) {
+          throw new ModelConversionError("Invalid allowed tool choice");
+        }
+        const selected = array(choice.tools).map(raw => {
+          const mapped = namedChoice(object(raw));
+          if (!mapped) throw new ModelConversionError("Unsupported allowed tool choice");
+          return mapped;
+        });
+        if (!selected.length || new Set(selected.map(tool => string(object(tool.function).name))).size !== selected.length) {
+          throw new ModelConversionError("Invalid allowed tool choice");
+        }
+        result.tool_choice = { type, allowed_tools: { mode: choice.mode, tools: selected } };
+      } else result.tool_choice = namedChoice(choice) ?? choice;
     }
   }
   if (source.parallel_tool_calls !== undefined) {

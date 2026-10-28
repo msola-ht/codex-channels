@@ -70,6 +70,7 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
   if (source.previous_response_id != null || source.conversation != null) fail();
   const identities = new Map<string, Identity>();
   let hostedSearch = false;
+  let clientSearch = false;
   const tools: Json[] = [];
   let changed = false;
   const add = (raw: unknown, namespace?: string, loaded = false): Json | undefined => {
@@ -78,6 +79,9 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
     if (raw.type === "custom" && (!record(raw.format) || raw.format.type !== "text" && (raw.format.type !== "grammar"
       || raw.format.syntax !== "lark" || typeof raw.format.definition !== "string"))) fail();
     const name = text(raw.name), id = key(name, namespace);
+    // Retrieved history stays readable when search is absent/disabled, but
+    // cannot introduce executable declarations into a compaction request.
+    if (loaded && (!clientSearch || source.tool_choice === "none")) return;
     const previous = identities.get(id);
     if (previous) { if (!loaded || previous.kind !== raw.type) fail(); return; }
     if (identities.size >= 512) fail();
@@ -100,12 +104,15 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
           || Object.keys(tool).some(field => !["type", "execution", "description", "parameters"].includes(field))
           || identities.has(key("tool_search")) || identities.size >= 512) fail();
         identities.set(key("tool_search"), { name: "tool_search", kind: "tool_search" });
+        clientSearch = true;
         tools.push({ type: "function", name: "tool_search", description: tool.description, parameters: tool.parameters }); changed = true;
       } else { add(tool); tools.push(tool); }
     }
   }
   // Codex returns retrieved declarations only in tool_search_output. Ollama's
-  // ordinary function API needs them explicitly loaded in this request.
+  // ordinary function API needs them explicitly loaded only while this request
+  // still declares client search and permits tool calls. Validate passive
+  // history as well, without inserting it into current identities or tools.
   if (Array.isArray(source.input)) for (const item of source.input) {
     if (!record(item) || item.type !== "tool_search_output") continue;
     if (item.execution !== "client" || item.status !== "completed" || !Array.isArray(item.tools)) fail();
@@ -201,7 +208,10 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
       calls.set(call, "custom");
       plain(raw);
       const id = identity(raw), found = identities.get(key(id.name, id.namespace));
-      if (!found || found.kind !== "custom") fail();
+      // Compaction sends history without tool declarations. A historical call
+      // describes past execution; it must not grant a tool to the next response.
+      // Keep current declarations authoritative only for newly returned calls.
+      if (found && found.kind !== "custom") fail();
       if (typeof raw.input !== "string" || !wellFormed(raw.input) || bytes(raw.input) > argumentLimit) fail();
       const { input: value, ...rest } = raw; changed = true;
       return { ...rest, type: "function_call", arguments: JSON.stringify({ input: value }) };
@@ -218,7 +228,7 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
   }) : source.input;
   for (const [call, kind] of calls) if (kind !== "function" && !outputs.has(call)) fail();
   return { body: changed ? { ...source, tools, ...(source.tool_choice === undefined ? {} : { tool_choice: mapChoice(source.tool_choice) }), input } : source,
-    adapter: new OllamaFreeformResponse(identities, allowed, new Set(calls.keys())) };
+    adapter: new OllamaFreeformResponse(identities, allowed, calls) };
 }
 
 interface Call {
@@ -243,8 +253,9 @@ export class OllamaFreeformResponse {
   private readonly itemIndexes = new Map<number, string>();
   private readonly toolCalls = new Map<string, string>();
   private readonly completedTools = new Map<string, string>();
-  constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlySet<string>) {
-    this.active = [...identities.values()].some(tool => tool.kind !== "function");
+  constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlyMap<string, Identity["kind"]>) {
+    this.active = [...identities.values()].some(tool => tool.kind !== "function")
+      || [...historyCalls.values()].some(kind => kind !== "function");
   }
 
   close(): void {
