@@ -1,6 +1,6 @@
 import type { ConversationCommandName } from "../application/index.js";
 import { surfaceCommandAliases } from "./slash-command.js";
-import { isConversationCommandVisible } from "./conversation-command-catalog.js";
+import { conversationCommandCatalog, isConversationCommandVisible } from "./conversation-command-catalog.js";
 
 export { conversationCommandDescriptions } from "./conversation-command-catalog.js";
 
@@ -134,3 +134,11 @@ export function formatConversationCommandHelpLines(
 }
 
 export const conversationCommandHelpLines = formatConversationCommandHelpLines();
+
+/** A shared discovery summary; channel renderers still own placement and markup. */
+export const conversationCommandQuickStartLines = [
+  "常用入口：",
+  ...(["status", "stop", "new", "resume", "workspace", "model"] as const)
+    .map(name => `- ${conversationCommandCatalog[name].label}：/${name}`),
+  "",
+];

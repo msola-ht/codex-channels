@@ -190,7 +190,7 @@ export function workspaceSelectionKeyboard(
   if (view.entries.length === 0) return undefined;
   return {
     inline_keyboard: view.entries.map((workspace) => [{
-      text: boundedButtonLabel(`${workspace.isCurrent ? "✓ " : ""}切换到 ${formatModelSettingLiteral(workspace.name)}`),
+      text: boundedButtonLabel(`${workspace.isCurrent ? "当前 · " : ""}${workspace.position}. ${formatModelSettingLiteral(workspace.name)}`),
       callback_data: `ws:${telegramWorkspaceSwitchToken(workspace.id)}`,
     }]),
   };
@@ -214,7 +214,7 @@ export function modelEffortKeyboard(
   const token = telegramModelSelectionToken(result.state, actorId);
   return {
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
-      text: `${option.effort === result.state.effort ? "✓ " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
+      text: `${option.effort === result.state.effort ? result.state.effortPending ? "已选 · " : "当前 · " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
       callback_data: `me:${index + 1}:${token}`,
     }]),
   };
@@ -232,7 +232,7 @@ function modelProviderSelectionText(
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ]),
     ...providers.map(({ id, position, isCurrent }) =>
-      `${position}. ${formatModelSettingLiteral(formatCodexProviderLabel(id))}${isCurrent ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, id)}`),
+      `${position}. ${formatModelSettingLiteral(formatCodexProviderLabel(id))}${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? " · 已选" : " · 当前" : ""} · ${formatProviderModelSummary(result.state.models, id)}\n`),
     "",
     ...(providers.length > 0
       ? ["请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。"]
@@ -256,7 +256,7 @@ export function modelProviderSelectionKeyboard(
   return {
     inline_keyboard: providers.map(({ id, position, isCurrent }) => [{
       text: boundedButtonLabel(
-        `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(id))}`,
+        `${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? "已选 · " : "当前 · " : ""}${position}. ${formatModelSettingLiteral(formatCodexProviderLabel(id))}`,
       ),
       callback_data: `mp:${position}:${token}`,
     }]),
@@ -268,17 +268,17 @@ export function modelSelectionKeyboard(
   actorId = "",
 ): InlineKeyboardMarkup | undefined {
   const { entries } = createModelSelectionPresentation(result.state);
-  if (result.view !== "model" || entries.length === 0) {
+  if (result.view !== "model") {
     return undefined;
   }
   const token = telegramModelSelectionToken(result.state, actorId);
   return {
-    inline_keyboard: entries.map(({ model, position, isCurrent }) => [{
+    inline_keyboard: [...entries.map(({ model, position, isCurrent }) => [{
       text: boundedButtonLabel(
-        `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}${model.available === false ? "（暂不可用）" : ""}`,
+        `${isCurrent ? result.state.modelPending ? "已选 · " : "当前 · " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}${model.available === false ? "（暂不可用）" : ""}`,
       ),
       callback_data: `ms:${position}:${token}`,
-    }]),
+    }]), [{ text: "返回提供商", callback_data: `mp:home:${token}` }]],
   };
 }
 
@@ -325,7 +325,7 @@ export function pluginKeyboard(
     const selector = result.selectors[index];
     return plugin.enabled && plugin.available && selector
       ? [[{
-          text: boundedButtonLabel(plugin.displayName),
+          text: boundedButtonLabel(`${selector}. ${formatModelSettingLiteral(plugin.displayName)}`),
           callback_data: `plugin:select:${telegramPluginSelectionToken(plugin.id)}`,
         }]]
       : [];
@@ -517,7 +517,13 @@ export async function replyTelegramPanel(
 }
 
 function boundedButtonLabel(value: string): string {
-  return value.length <= 48 ? value : `${value.slice(0, 47)}…`;
+  if (value.length <= 48) return value;
+  let prefix = "";
+  for (const character of value) {
+    if (prefix.length + character.length > 47) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
 }
 
 const resetCreditListTokens = new Map<string, { token: string; expiresAt: number }>();

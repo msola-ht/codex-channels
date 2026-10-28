@@ -28,8 +28,11 @@ export function formatConversationWorkspaces(
       ? [`原选择已失效：${literal(view.currentWorkspaceId)}。请选择下列工作区后重新发起操作。`]
       : []),
     ...view.entries.flatMap((workspace) => [
-      `${workspace.position}. ${literal(workspace.name)} · ${literal(workspace.id)}${workspace.isCurrent ? " ← 当前" : ""}`,
+      `${workspace.position}. ${literal(workspace.name)}${workspace.isCurrent ? " · 当前" : ""}`,
+      "",
+      `- ID：${literal(workspace.id)}`,
       `- 工作目录：${literal(workspace.cwd)}`,
+      "",
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",

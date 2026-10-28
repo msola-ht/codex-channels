@@ -38,6 +38,7 @@ import type {
 } from "../types.js";
 import {
   conversationCommandHelpLines,
+  conversationCommandQuickStartLines,
 } from "../conversation-command-help.js";
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
@@ -583,6 +584,9 @@ export class TelegramSurface {
           "## Codex Connect Gateway",
           "",
           "普通文本会发送到当前 Codex Session。",
+          "",
+          ...conversationCommandQuickStartLines,
+          "### 消息与附件",
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
@@ -713,7 +717,7 @@ export class TelegramSurface {
       );
     });
     this.bot.callbackQuery(
-      /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
+      /^mp:(home|[1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
         const guard = this.queryGuard(modelTarget, String(context.from.id));
@@ -728,14 +732,14 @@ export class TelegramSurface {
           );
         }
         const providers = listProviders(state.models);
-        const provider = providers[Number(context.match[1]) - 1];
-        if (!provider) {
+        const provider = context.match[1] === "home" ? "" : providers[Number(context.match[1]) - 1];
+        if (provider === undefined) {
           throw new UserFacingError(
             "model.selection.expired",
             "提供商列表已变化，请重新发送 /model 选择",
           );
         }
-        await context.answerCallbackQuery({ text: "正在浏览提供商" });
+        await context.answerCallbackQuery({ text: provider ? "正在浏览提供商" : "返回提供商列表" });
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });

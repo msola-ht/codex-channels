@@ -34,7 +34,15 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${literal(result.view.searchTerm)}` : ""}：`,
     ...entries.map(
       ({ session, selector, isCurrent, isBackground }) =>
-        `${selector}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${session.model ? ` · 模型：${literal(session.model)}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}` : ""}${session.modelProvider ? ` · Provider：${literal(formatDisplayedProvider(session.modelProvider))}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${literal(session.id.slice(0, 12))} · ${session.status.type}${isCurrent ? " ← 当前" : isBackground ? " · 后台运行" : ""}`,
+        [
+          `${selector}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${isCurrent ? " · 当前" : isBackground ? " · 后台运行" : ""}`,
+          "",
+          ...(session.model ? [`- 模型：${literal(session.model)}`] : []),
+          ...(session.reasoningEffort ? [`- ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}`] : []),
+          ...(session.modelProvider ? [`- Provider：${literal(formatDisplayedProvider(session.modelProvider))}`] : []),
+          `- ID：${literal(session.id.slice(0, 12))} · 状态：${session.status.type}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`}`,
+          "",
+        ].join("\n"),
     ),
     ...(result.pageCount > 1
       ? [
@@ -161,9 +169,13 @@ function formatSessionLabel(value: string): string {
   if (!normalized) {
     return "未命名";
   }
-  return normalized.length > maximumSessionLabelCharacters
-    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
-    : normalized;
+  if (normalized.length <= maximumSessionLabelCharacters) return normalized;
+  let prefix = "";
+  for (const character of normalized) {
+    if (prefix.length + character.length > maximumSessionLabelCharacters - 1) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
 }
 
 export function formatConversationOccupancy(
