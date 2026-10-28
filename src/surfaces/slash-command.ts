@@ -31,9 +31,9 @@ export function parseSlashCommand(text: string): ParsedSlashCommand | null {
 }
 
 export function normalizeSurfaceCommandName(name: string): string {
-  return surfaceCommandAliases[
-    name as keyof typeof surfaceCommandAliases
-  ] ?? name;
+  return Object.hasOwn(surfaceCommandAliases, name)
+    ? surfaceCommandAliases[name as keyof typeof surfaceCommandAliases]
+    : name;
 }
 
 export function isEmergencyStopCommand(text: string): boolean {
