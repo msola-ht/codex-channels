@@ -20,7 +20,7 @@ import {
   formatConversationAutoReview,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -535,49 +535,10 @@ export function renderCommandCenterChoices(
     && result.kind === "sessions"
     && !result.archived
   ) {
-    if (result.sessions.length === 0) {
-      return undefined;
-    }
-    const entries = createSessionListPresentation(result);
-    return {
-      title: "选择会话",
-      description: "点击后切换到对应 Codex Session。",
-      choices: [
-        {
-          label: "搜索会话…",
-          action: "sessions-search",
-          input: "",
-        },
-        ...sessionNavigationChoices(result, "sessions"),
-        ...entries.map(({ session, isCurrent, isBackground }) => ({
-          label: `${isCurrent ? "✓ " : isBackground ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
-          action: "resume" as const,
-          input: session.id,
-        })),
-      ],
-    };
+    return renderSessionCommandChoices(result);
   }
   if (action === "archived" && result.kind === "sessions" && result.archived) {
-    if (result.sessions.length === 0) {
-      return undefined;
-    }
-    return {
-      title: "恢复已归档会话",
-      description: "点击后取消归档并切换到对应 Codex Session。",
-      choices: [
-        {
-          label: "搜索归档…",
-          action: "archived-search",
-          input: "",
-        },
-        ...sessionNavigationChoices(result, "archived"),
-        ...createSessionListPresentation(result).map(({ session }) => ({
-          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
-          action: "unarchive" as const,
-          input: session.id,
-        })),
-      ],
-    };
+    return renderSessionCommandChoices(result);
   }
   if (action === "workspace" && result.kind === "workspaces") {
     const view = createWorkspaceSelectionPresentation(result);
@@ -585,16 +546,24 @@ export function renderCommandCenterChoices(
       return undefined;
     }
     return {
-      title: "选择工作区",
+      title: "工作区",
       description: [
         "### 当前工作区",
-        `- ${view.currentWorkspaceId}${view.currentWorkspace ? "" : "（已失效）"}`,
+        `- ${choiceCardLiteral(view.currentWorkspaceId)}${view.currentWorkspace ? "" : "（已失效）"}`,
+        "",
+        "### 工作区清单",
+        ...view.entries.slice(0, 18).flatMap(workspace => [
+          `**${workspace.position}. ${choiceCardLiteral(workspace.name, 80)}**${workspace.isCurrent ? " · 当前" : ""}`,
+          "",
+          `目录：${choiceCardLiteral(workspace.cwd, 160)}`,
+          "",
+        ]),
         "",
         "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
       ].join("\n"),
-      descriptionFormat: "markdown",
+      descriptionFormat: "lark_md",
       choices: view.entries.map((workspace) => ({
-        label: `${workspace.isCurrent ? "✓ " : ""}${workspace.name}`,
+        label: choiceButtonLabel(`${workspace.position} · ${formatModelSettingLiteral(workspace.name)}`),
         action: "workspace-select",
         input: workspace.id,
       })),
@@ -649,7 +618,7 @@ export function renderCommandCenterChoices(
   const snapshot = modelSelectionSnapshot(result.state);
   const presentation = createModelSelectionPresentation(result.state);
   const currentModel = presentation.availableCurrentModel;
-  const settingLines = formatConversationModelState(result, escapeFeishuCardMarkdown).map(line => `- ${line}`);
+  const settingLines = formatConversationModelState(result, choiceCardLiteral).map(line => `- ${line}`);
   if (action === "model") {
     if (result.state.models.length === 0) {
       return undefined;
@@ -662,10 +631,15 @@ export function renderCommandCenterChoices(
           ...settingLines,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
+          "",
+          "### 提供商清单",
+          ...presentation.providers.slice(0, 18).map(({ id, position, isCurrent }) =>
+            `${position}. **${choiceCardLiteral(formatCodexProviderLabel(id), 80)}**${isCurrent && result.state.modelProvider !== undefined ? result.state.providerPending ? " · 已选" : " · 当前" : ""} · ${choiceCardLiteral(formatProviderModelSummary(result.state.models, id))}`
+          ),
         ].join("\n"),
-        descriptionFormat: "markdown",
-        choices: presentation.providers.map(({ id: provider, isCurrent }) => ({
-          label: `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))} · ${formatProviderModelSummary(result.state.models, provider)}`,
+        descriptionFormat: "lark_md",
+        choices: presentation.providers.map(({ id: provider, position }) => ({
+          label: choiceButtonLabel(`${position} · ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`),
           action: "model",
           input: provider,
           modelSelection: { kind: "browse-provider", provider, snapshot },
@@ -677,13 +651,19 @@ export function renderCommandCenterChoices(
       description: [
         "### 当前设置",
         ...settingLines,
-        `- 浏览 Provider：${formatModelSettingLiteral(formatCodexProviderLabel(result.state.providerFilter), escapeFeishuCardMarkdown)}`,
+        `- 浏览 Provider：${choiceCardLiteral(formatCodexProviderLabel(result.state.providerFilter))}`,
         "",
         "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。",
+        "",
+        "### 模型清单",
+        ...presentation.entries.slice(0, 18).flatMap(({ model, position, isCurrent }) => [
+          `**${position}. ${choiceCardLiteral(modelListDisplayName(model.displayName, model.provider, model.model), 80)}**${isCurrent ? result.state.modelPending ? " · 已选" : " · 当前" : ""} · ${formatModelSpeedSupport(model)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `：${choiceCardLiteral(model.unavailableReason)}` : ""}` : ""}`,
+          "",
+        ]),
       ].join("\n"),
-      descriptionFormat: "markdown",
-      choices: presentation.entries.map(({ model, provider, position, isCurrent }) => ({
-        label: `${isCurrent ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
+      descriptionFormat: "lark_md",
+      choices: presentation.entries.map(({ model, provider, position }) => ({
+        label: choiceButtonLabel(formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, position))),
         action: "model",
         input: String(position),
         modelSelection: { kind: "model", provider, model: model.model, snapshot },
@@ -700,8 +680,13 @@ export function renderCommandCenterChoices(
       description: [
         "### 当前设置",
         ...settingLines,
+        "",
+        "### 可选档位",
+        ...efforts.slice(0, 18).map((option, index) =>
+          `${index + 1}. **${choiceCardLiteral(formatReasoningEffort(option.effort), 40)}**${option.effort === result.state.effort ? result.state.effortPending ? " · 已选" : " · 当前" : ""}${option.description ? ` · ${choiceCardLiteral(option.description, 160)}` : ""}`
+        ),
       ].join("\n"),
-      descriptionFormat: "markdown",
+      descriptionFormat: "lark_md",
       choices: efforts.map(
         (option) => ({
           label: `${option.effort === result.state.effort ? "✓ " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
@@ -716,9 +701,17 @@ export function renderCommandCenterChoices(
     const speed = result.state.serviceTierKnown !== true
       ? "未知" : formatServiceTier(result.state.serviceTier, currentModel);
     return {
-      title: "切换速度",
-      description: [...settingLines, `- 当前模型：${formatModelSpeedSupport(currentModel)}`].join("\n"),
-      descriptionFormat: "markdown",
+      title: "Fast",
+      description: [
+        ...settingLines,
+        `- 当前模型：${formatModelSpeedSupport(currentModel)}`,
+        "",
+        "### 可选速度",
+        ...presentation.speedOptions.map(({ label, mode }) =>
+          `- **${label}**${speed === label ? " · 已选" : ""} · ${mode === "off" ? "标准档位" : mode === "on" ? "Fast 加速档位" : "Ultrafast 加速档位"}`
+        ),
+      ].join("\n"),
+      descriptionFormat: "lark_md",
       choices: presentation.speedOptions.map(({ label, mode }) => ({
         label: `${speed === label ? "✓ " : ""}${label}`,
         action: "fast",
@@ -743,6 +736,75 @@ function scheduleChoiceSummary(
     case "weekdays": return `工作日 ${schedule.time}`;
     case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time}`;
   }
+}
+
+function renderSessionCommandChoices(
+  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+): FeishuCommandCenterChoices | undefined {
+  if (result.sessions.length === 0) return undefined;
+  const entries = createSessionListPresentation(result);
+  const listAction = result.archived ? "archived" : "sessions";
+  const restoreAction = result.archived ? "unarchive" : "resume";
+  return {
+    title: result.archived ? "恢复已归档会话" : "选择会话",
+    // Reuse the existing Markdown-body/plain-button path; no option is a default selection.
+    descriptionFormat: "lark_md",
+    description: [
+      `匹配 ${result.matchedSessionCount} 条 · 第 ${result.page}/${result.pageCount} 页`,
+      ...(result.view.searchTerm ? [`搜索：${choiceCardLiteral(result.view.searchTerm)}`] : []),
+      result.archived
+        ? "按下方编号取消归档并切换到对应会话。"
+        : "按下方编号切换到对应会话。",
+      "",
+      ...entries.flatMap(({ session, selector, isCurrent, isBackground }) => {
+        const markers = [
+          ...(!result.archived && isCurrent ? ["当前"] : !result.archived && isBackground ? ["后台"] : []),
+          ...(session.isPinned ? ["固定"] : []),
+        ];
+        const title = choiceCardLiteral((session.name ?? session.preview) || "未命名", 32) || "未命名";
+        const modelFields = [
+          ...(session.model ? [`模型：${choiceCardLiteral(session.model, 80)}`] : []),
+          ...(session.reasoningEffort ? [`${reasoningEffortSettingName(session.reasoningEffort)}：${choiceCardLiteral(formatReasoningEffort(session.reasoningEffort), 40)}`] : []),
+          ...(session.modelProvider ? [`Provider：${choiceCardLiteral(formatDisplayedProvider(session.modelProvider), 80)}`] : []),
+        ];
+        return [
+          `**${selector}. ${title}**${markers.length ? ` · ${markers.join(" · ")}` : ""}`,
+          ...(modelFields.length ? [modelFields.join(" · ")] : []),
+          `ID：${choiceCardLiteral(session.id.slice(0, 12), 12)} · 状态：${choiceCardLiteral(session.status.type, 40)}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`}`,
+          "",
+        ];
+      }),
+      "标题或字段过长时会截断；按钮编号对应以上条目。",
+    ].join("\n"),
+    choices: [
+      { label: result.archived ? "搜索归档" : "搜索会话", action: result.archived ? "archived-search" : "sessions-search", input: "" },
+      ...sessionNavigationChoices(result, listAction),
+      ...entries.map(({ session, selector }): FeishuCommandCenterChoices["choices"][number] => ({
+        label: choiceButtonLabel(`${selector} · ${formatModelSettingLiteral((session.name ?? session.preview) || "未命名") || "未命名"}`),
+        action: restoreAction,
+        input: session.id,
+      })),
+    ],
+  };
+}
+
+function choiceButtonLabel(value: string): string {
+  // Stay within the consumer's 32 UTF-16 unit budget without splitting a code point.
+  if (value.length <= 32) return value;
+  let prefix = "";
+  for (const character of value) {
+    if (prefix.length + character.length > 31) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
+}
+
+function choiceCardLiteral(value: string, maximumCharacters = 120): string {
+  const characters = Array.from(formatModelSettingLiteral(value));
+  const bounded = characters.length > maximumCharacters
+    ? `${characters.slice(0, maximumCharacters - 1).join("")}…`
+    : characters.join("");
+  return escapeFeishuCardMarkdown(bounded.replaceAll("&", "&amp;").replaceAll("<", "&lt;"));
 }
 
 function sessionNavigationChoices(
