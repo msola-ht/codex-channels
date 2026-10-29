@@ -21,6 +21,8 @@ import {
   type ConversationSessionUseCases,
   type ConversationTurnUseCases,
   type ScheduledTaskConfirmation,
+  type ConversationStatus,
+  type HookStartupSummary,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -121,6 +123,7 @@ export interface TelegramAudioPort {
 }
 
 export interface TelegramSurfaceOptions {
+  startupHooks?: (target: ConversationTarget, status: ConversationStatus, signal: AbortSignal) => Promise<HookStartupSummary>;
   gatewayVersion: string;
   appServerTimezone?: string;
   commands: ConversationCommandExecutor;
@@ -364,11 +367,21 @@ export class TelegramSurface {
             });
             signal.throwIfAborted();
             if (active.aborted || status === undefined) continue;
+            const hooks = options.startupHooks ? await options.startupHooks({
+              surface: "telegram", accountId: telegramDefaultAccountId, conversationId: String(chatId),
+            }, status, active).catch(() => {
+              signal.throwIfAborted();
+              logger.warn({ chatId }, "Telegram 启动 Hook 查询目标已失效，跳过该收件人");
+              return undefined;
+            }) : undefined;
+            signal.throwIfAborted();
+            if (active.aborted || (options.startupHooks && hooks === undefined)) continue;
             const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
             messages.push({
               chatId,
               signal: active,
               text: formatStartupNotification(workspaces, status, {
+                ...(hooks ? { hooks } : {}),
                 platform: process.platform,
                 architecture: process.arch,
                 ...(options.appServerTimezone === undefined

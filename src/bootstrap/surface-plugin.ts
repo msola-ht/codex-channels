@@ -12,6 +12,7 @@ import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 
 import type { OpenAiConnectivityStatus } from "./openai-connectivity.js";
+import type { StartupHooksReader } from "./startup-hooks.js";
 
 export interface SurfaceRuntimeModule {
   readonly adapter: SurfaceAdapter;
@@ -25,6 +26,7 @@ export interface SurfacePluginContext {
   config: GatewayConfig;
   service: SurfaceConversationUseCases;
   commands: ConversationCommandExecutor;
+  startupHooks: StartupHooksReader;
   bindings: BindingStore;
   logger: Logger;
   gatewayVersion: string;
