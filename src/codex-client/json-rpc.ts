@@ -39,6 +39,8 @@ export interface RpcRequestOptions {
   attempts?: number;
   signal?: AbortSignal;
   beforeSubmit?: () => void;
+  /** 命名专用单次本地期限；不改变其他请求默认的 60 秒合同。 */
+  timeoutMs?: number;
 }
 
 export interface RpcNotification {
@@ -212,6 +214,8 @@ export class JsonRpcClient {
     this.serverRequestHandler = handler;
   }
 
+  isConnected(): boolean { return this.state === "connected"; }
+
   async request<T>(
     request: RpcClientRequest,
     options: RpcRequestOptions = { retryOverload: false },
@@ -221,7 +225,7 @@ export class JsonRpcClient {
       // A rejected local guard must never enter the overload retry path.
       options.beforeSubmit?.();
       try {
-        return await this.requestOnce<T>(request, options.signal);
+        return await this.requestOnce<T>(request, options.signal, options.timeoutMs);
       } catch (error) {
         if (!(error instanceof JsonRpcError) || error.code !== -32001 || attempt === attempts) {
           throw error;
@@ -242,7 +246,9 @@ export class JsonRpcClient {
   private async requestOnce<T>(
     request: RpcClientRequest,
     signal?: AbortSignal,
+    timeoutMs = this.requestTimeoutMs,
   ): Promise<T> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Codex JSON-RPC 请求期限已到");
     signal?.throwIfAborted();
     const { method } = request;
     const id = this.nextId++;
@@ -262,7 +268,7 @@ export class JsonRpcClient {
           "Codex JSON-RPC 请求完成",
         );
         reject(new Error(`Codex JSON-RPC 请求超时：${method}`));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
       timer.unref();
       const pending: PendingRequest = { resolve, reject, timer, method, startedAtMs };
       let abortRequest: (() => void) | undefined;

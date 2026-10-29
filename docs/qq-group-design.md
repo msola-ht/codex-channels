@@ -2,6 +2,8 @@
 
 ## 状态与依据
 
+2026-10-28 范围调整：用户已要求删除 Gateway 的会话 Queue、Goal 和 Luna Reserve 自动回退。下文涉及忙时入队、队列管理与来源关联的群设计依赖已不再成立，相关 G1/G3 方案暂停，后续实施前需重新确定忙时输入合同；不得按旧设计恢复已删除功能。本次仅移除现有功能，不实施群能力或另建排队机制。
+
 状态：旧群业务实现已删除，新群能力待实施设计；初始群工作区布局保留，观察结果见“本轮前置步骤”。用户已确定以 DSH 的群共享会话方式重新规划，不迁移旧群实现或数据。本文记录目标合同、设计风险、实施顺序及开放问题，不代表新群功能已实现或部署。
 
 - 初次源码审查基线：`c60533926683613a5c06e22cb3d554ce5289bf96`；共享路由修复后复审基线：`e54ebe977a8fe3cd5d66fbde9a9e0e28d450c107`。这些基线中的群与成员复合身份、入站、按钮、群 Outbox、配对及配置入口已删除。当前只支持 QQ 单聊，不解析或恢复旧群业务记录，不迁移或自动删除用户数据；实际支持范围见 [QQ 消息合同](qq-message-contract.md)。
@@ -101,7 +103,7 @@ QQ Transport / Protocol
 | 同一组合根的异步问题及[动态计划工具](../src/bootstrap/scheduled-task-tool-request.ts)要求允许 Actor 恰好一人 | 多成员群无法确定问题或任务归属 | 从精确请求/任务来源取操作者；无法证明时失败关闭 |
 | [普通提交](../src/application/conversation-service.ts)在活动 Turn 上默认 steer | B 的新需求改变 A 正在执行的任务；来源层又因 actor 不同拒绝合并 | 群普通忙时输入走原生 Queue；首版不开放跨成员 steer |
 | [异步问题协调器](../src/bootstrap/async-question-coordinator.ts)与共享 `submitAsyncAnswer` 只固定原 Thread，回答作为普通 Turn 输入提交 | A 的问题仍可回应时 A Turn 已结束、B Turn 已开始，回答可能 steer B | 群回答必须固定原 Turn；首版原 Turn 结束即过期拒绝，不转 Queue 或新 Turn，具体合同见交互归属 |
-| [Queue 更新](../src/application/thread-queue-service.ts)保留条目的 `clientUserMessageId`，[Queue 来源](../src/surfaces/qq/queue-sources.ts)据此关联原作者 | 管理者改正文后仍保留旧作者来源；原生客户端修改也不能由本地票据可靠归因 | 首版不开放群 Queue 正文更新；修改后的来源不能宣称已可靠，后续另定作者、编辑者和外部修改语义 |
+| Queue 更新（历史文件 `src/application/thread-queue-service.ts`，现已删除）保留条目的 `clientUserMessageId`，Queue 来源（历史文件 `src/surfaces/qq/queue-sources.ts`，现已删除）据此关联原作者 | 管理者改正文后仍保留旧作者来源；原生客户端修改也不能由本地票据可靠归因 | 首版不开放群 Queue 正文更新；修改后的来源不能宣称已可靠，后续另定作者、编辑者和外部修改语义 |
 | [Queue 端口](../src/application/thread-queue-port.ts)只支持文本，待生效覆盖可能产生 `queue.pending-overrides` | 忙时附件或结构化输入若绕回普通提交将 steer；模型/Plan 偏好可能使文本入队拒绝 | 首版只接受纯文本排队，准备前拒绝不支持输入，最终提交重查忙状态；覆盖保持并明确提示拒绝 |
 | 单聊 [QQ 控制器](../src/surfaces/qq/messages.ts)在共享命令前取消目标的来源、菜单和交互 | 若整体复制为群入口，普通成员的停止/切换命令可能先影响全群 | 新群所有副作用前完成操作级授权 |
 | 单聊 [交互](../src/surfaces/qq/interactions.ts)按 Conversation 证明响应者 | 新共享群身份不能证明点击者权限 | 精确请求绑定独立的响应者权限和实时守卫 |

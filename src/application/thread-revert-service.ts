@@ -17,8 +17,8 @@ import type {
 import type { ThreadQueuePage, ThreadQueuePort } from "./thread-queue-port.js";
 import {
   maximumNativeQueueItems,
-  queueUserFacingError,
-} from "./thread-queue-service.js";
+  queueReadError,
+} from "./thread-queue-reader.js";
 import { pageOffset, pageSelector, requirePage } from "./pagination.js";
 
 const pageSize = 25;
@@ -507,12 +507,14 @@ export class ThreadRevertService {
     try {
       page = await this.queue.listQueue(threadId, { limit: maximumNativeQueueItems, beforeSubmit });
     } catch (error) {
-      throw queueUserFacingError(error, "list");
+      throw queueReadError(error);
     }
     beforeSubmit();
     if (
       page.nextCursor !== null
-      || page.items.length > maximumNativeQueueItems
+      || !Number.isSafeInteger(page.itemCount)
+      || page.itemCount < 0
+      || page.itemCount > maximumNativeQueueItems
       || typeof page.fingerprint !== "string"
       || page.fingerprint.length !== 64
     ) {
@@ -521,7 +523,7 @@ export class ThreadRevertService {
         "无法确认当前 Queue，Revert 已失败关闭",
       );
     }
-    return { count: page.items.length, fingerprint: page.fingerprint };
+    return { count: page.itemCount, fingerprint: page.fingerprint };
   }
 
   private rememberSelectionSnapshot(

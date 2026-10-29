@@ -218,7 +218,11 @@ export class WeixinInputAdapter {
         ? "video" : undefined;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(target, allowed, kind,
-      () => this.options.service.prepareAttachmentSubmission?.(target, allowed, kind));
+      () => this.options.service.prepareAttachmentSubmission?.(target, allowed, kind, undefined,
+        message.kind === "audio" && message.audio.transcript?.trim()
+          ? { actorId: message.actorId, text: message.audio.transcript, source: "transcription" }
+          : message.kind !== "audio" && message.text?.trim()
+            ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined));
     this.receivedAttachments.set(message, receipt);
     return () => { receipt.dispose(); this.receivedAttachments.delete(message); };
   }

@@ -389,8 +389,8 @@ codexc app status [--provider <Provider ID>] [--json]
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。
-- 同一 Thread 的活动 Turn 不能被第二端无条件追加新 Turn。普通渠道补充输入通过 `turn/steer` 进入活动 Turn，显式 `/queue` 才进入 App Server Queue；
-  Desktop 如何呈现 Queue 由官方客户端决定。
+- 同一 Thread 的活动 Turn 不能被第二端无条件追加新 Turn。普通渠道补充输入通过 `turn/steer` 进入活动 Turn；Gateway 不提供 Queue 入队、管理或主动启动入口，仅保留绑定、模型选择与 Revert 所需的只读检查。
+  原生队列数据与派发由 App Server 管理，Desktop 如何呈现 Queue 由官方客户端决定。
 - Server Request 由产生请求的 App Server 连接处理。Desktop 发起 Turn 的命令、文件、权限、用户
   输入或 MCP 请求留在 Desktop；Gateway 发起 Turn 的请求仍走现有渠道审批。桥不广播、不转移、
   不代答审批。

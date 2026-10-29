@@ -12,7 +12,7 @@ Telegram 既有空白 commentary 的明确省略特例保持不变；该设置�
 
 常规通知由目标 `routineNotificationsEnabled` 控制，四渠道均支持，缺省开启。`delivery-policy.ts` 按结构化事件区分普通成功提示与需要关注的结果；状态观察、授权和原持久义务独立。Gateway 上线摘要、App Server 连接恢复、会话空闲释放和全局空闲释放不受常规通知开关控制；微信恢复提示沿原回复上下文和配额发送；配置只有 live 普通提示可隐藏，持久工作区回执仍需原交付确认。失败、重试、账户/额度、OAuth、审批及主动命令不由该开关屏蔽。
 
-[QQ](qq/README.md) 已接入文字任务、命令菜单、共享持久投递及审批/问题回应；图片、文本/普通文件、原生引用、音视频输入、原生 Queue、计划任务和当次配置通知已随 `9c0d3488` 部署，具体客户端证据与待验收范围见模块文档。部署就绪不代表所有分支验收完成，旧来源仍不恢复。
+[QQ](qq/README.md) 已接入文字任务、命令菜单、共享持久投递及审批/问题回应；图片、文本/普通文件、原生引用、音视频输入、计划任务和当次配置通知已随 `9c0d3488` 部署，具体客户端证据与待验收范围见模块文档。部署就绪不代表所有分支验收完成，旧来源仍不恢复。
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
@@ -49,7 +49,7 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 
 工作区只选择登记目录；`/status` 和生命周期卡片的权限相关状态取 App Server 实际值。
 `/status` 经共享格式化入口显示精简的当前会话、执行设置、有效消息模式、上下文及累计 Token；四渠道不再提供详情视图。
-仅在目录未确认或与工作区不同时追加说明；目标只显示状态并指向 `/goal`，额度显示已取得的账户余额、额度窗口或周限摘要，查询失败时提示通过 `/usage` 或 `/limits` 重查。
+仅在目录未确认或与工作区不同时追加说明；额度显示已取得的账户余额、额度窗口或周限摘要，查询失败时提示通过 `/usage` 或 `/limits` 重查。
 动态字段统一清理控制字符，飞书与微信使用字面值转义，Telegram 使用已有 HTML 字段值转义；底层执行目录、指令来源和加载快照不因精简展示而删除。
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
 Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
@@ -90,7 +90,7 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 普通输出 `handle` 的可选第三参数传递共享会话队列取消信号；QQ 正文流在该队列内等待单帧完成，并将取消传递到来源等待、节流及 HTTP。
 QQ 持久投递模式在同步观察所有增量后，按同一 Thread/Turn/Item 合并待执行唤醒；其他渠道与非持久模式不丢弃逐事件输入。组合根通过公开的 `withSurfaceOutputDiagnostics` 复用身份上下文，使 QQ 路由队列诊断包含事件类型和 Item，不携带正文。
 可选 capabilities 分别约束自动绑定恢复、交互、计划任务及持久配置事件订阅；QQ 启用绑定恢复、交互和计划任务，`configurationNotifications: false` 排除持久 Workspace 配置事件重放，当次 `configurationChanged` 仍发送受控通知。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
-可选 `output.observeUserMessageIdentity` 接收当前已握手连接投影的官方用户消息四项身份，QQ 结合 Queue 提交响应关联精确 Turn；`output.observeQueueChanged` 只清理未用选择。可选 `prepareScheduledTaskSubmission` 为 Executor 提供独立提交观察票据；QQ 将计划运行固定于原任务 Workspace 和后台绑定，经权威响应确认 Turn，前台切换不改变该归属。
+可选 `prepareScheduledTaskSubmission` 为 Executor 提供独立提交观察票据；QQ 将计划运行固定于原任务 Workspace 和后台绑定，经权威响应确认 Turn，前台切换不改变该归属。
 可选 `takeAsyncAnswerSubmission(target, requestId)` 按原目标与请求单次领取异步回答的 `observer/isCurrent/cancel` 及可选 `failed` 通知端口；Bootstrap 将其接入 `ConversationService.submitAsyncAnswer`，提交前及等待后复核，失败取消来源并尝试受控提示。QQ 必须取得该次回答来信的新来源才可提交；确认后保留来源至正常释放，不恢复旧来源，其他渠道未实现此可选端口时沿用原路径。
 每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
@@ -148,11 +148,9 @@ Hook 完成通知按 Thread 与 Hook 运行 ID 使用已有有界内存快照投
 事件恒为真，其他渠道沿用 Core 判定；`ConversationDeliveryQueue` 的排队关键性决定队列满时该平台
 发送能否被丢弃，由渠道按用户可见结果选择。收紧或合并任意两层前，必须先确认对应渠道的用户可见
 结果。
-Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
-只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
 统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
-确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
+确认令牌或历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
 Gateway 计划任务同样由 Application 统一编排；四个 Surface 只渲染 `/schedule` 的类型化列表、Run、
 预览与操作结果。飞书管理按钮携带完整任务或 Run ID 并继续走共享命令；显式命令和 `schedule_task`
 工具预览都按精确 Surface 复用同一呈现入口，飞书与 Telegram 的创建/删除确认按钮提交同一五分钟令牌，
@@ -190,6 +188,8 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 
+自动命名的候选通过独立 `TitleInputContext` 传递：Surface 在仍知道来源时标明原用户任务、媒体附文或已有平台语音转写，批处理只聚合同一 Actor 且同类来源的显式候选。正文中的引用、默认媒体提示、附件暂存路径与视频能力引用不作为候选；纯媒体或没有可靠文字来源时省略上下文，原输入仍按既有规则提交。附件准备可先携带附文，下载后 `submit` 可提供明确的转写候选；命名的持续授权由 Application/Bootstrap 独立签发，不沿用附件取消范围或 QQ 一次性票据。QQ 的原 `SubmissionObserver` 继续负责结果来源关联。
+
 `video-attachment-store.ts` 为四渠道提供独立视频附件暂存与单文件随机引用：复用私有媒体存储，按渠道分目录，最多保留八个文件并允许一个串行去重候选，每个文件最大 64 MiB、24 小时过期；只初步验证 MP4/WebM 容器签名，实际可解码性由 Strata 判断。流保存及哈希含排队最多 60 秒、最多四条在途流，关闭销毁流并等待收尾。`store` 接受已授权的 ConversationTarget 与 Actor，按作用域和 SHA-256 去重；Adapter 在提交成功或结果不确定时 `retain`，确定未提交时 `discard`，复用旧附件不会被失败清理删除。去重仅保留有界内存元数据，不续期，不跨会话或重启恢复映射。共享附件提示指导原引用追问及有界 context 传递。引用是持有者凭据，仅提交给完成授权的当前 Conversation；MCP 不提供列举入口，不依赖可伪造的 Actor 参数鉴权。引用不代表跨会话身份认证，泄露后可在有效期内转授读取权。暂存内容不写 StateStore；使用方式与部署边界见[视频分析 MCP](../../docs/video-analysis-mcp.md)。
 四渠道共享的 `/metrics` 分开展示当前 Thread 最近有请求记录 Turn 的运行聚合、指标库保留范围内的会话累计，
 `global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
@@ -198,7 +198,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 不把请求累计输入误写成上下文占用。当前会话显示完整 ID、已有官方执行耗时及普通请求平均首 Token、加权输出速度；主 Thread 耗时与递归请求性能的范围分别保留，缺失不推算，历史耗时不完整明确标记。压缩摘要只列请求数、Token 和模型/异常，不展开性能、本地价格或费用；完成卡只显示官方整轮耗时，标为“本轮耗时”。
 `cloud-usage-format.ts` 将官方云用量投影为分组 Markdown：额度、统计范围、请求与 Token、费用。额度优先，套餐余额与额外购买分开，Token 明细嵌套在总量下；单价排除搜索、抓取及明确零 Token 分组的费用，缺失数据不补零，不附解释文案。费用中按纯 Token 消费预测套餐及剩余额度可用 Token，Pro $60 额度按月付 $20 和每日缓存汇率估算人民币成本。隐藏套餐到期占位、独立时区行与数据更新分组，保留内部时区转换和缓存逻辑。共享时间与刷新选择，不展示模型分组，不使用本地请求估算。飞书消费 Markdown 卡片，Telegram 转为 HTML，两者更新原卡；QQ 使用受保护的一次性菜单按钮返回新结果，微信保留时间与刷新命令。QQ 通过菜单的正文与 Markdown 字段交付，并校验原用户、查询范围与账户。
 信息类聊天指令（`/status`、`/usage`、
-`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
+`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、
 `/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。四渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段及 QQ 安全 Markdown/完整字面回退渲染列表。
@@ -221,7 +221,7 @@ Conversation，旧会话完成不能删除新会话已登记的回复目标。�
 Provider 分别生成固定凭据提示，不展示上游原文。完成通知在 `basic` 下保留状态、上下文、可用耗时及必要异常；`brief` 不增加耗时。
 `detailed` 另显示模型设置、本轮请求结果、已观测 Token 总计、缓存命中率及已取得的当前账户额度，不展开环境、Token/性能分项或会话累计。
 缺失本轮输入/输出时不以零或最近请求补齐；上下文仍取最近权威上下文用量。父 Turn 存在明确子代理合计时另展示任务合计，
-不混入父 Turn 自身统计；失败后成功的可恢复请求保留“自动重试、最终成功”语义，错误、后台身份、Goal 及仍运行子代理保留。
+不混入父 Turn 自身统计；失败后成功的可恢复请求保留“自动重试、最终成功”语义，错误、后台身份及仍运行子代理保留。
 基础子代理完成仅名称和状态，详细子代理保留模型设置、请求数、Token 总计和缓存命中率，不展开 Token 分项。
 四渠道上线和完成通知在所有呈现档位（含 `brief`）保留工作区与已取得的 Git 分支；缺少分支隐藏整行，完成工作区优先名称、其次 ID，均缺失时显示“未知”。详细上线保留会话摘要及工作目录、Session ID、协作模式，不再自动展开系统/UA等环境字段。未绑定或尚未恢复时不展示默认模型冒充当前设置。
 “已开始处理”和后台继续处理的共享内容从 `turn.started` 接收任务工作区与 Git 分支；缺少工作区采用相同占位，缺少分支隐藏整行，原常规通知准入保持独立。飞书已准入的开始回执统一经 Markdown 发送路径处理可选回复目标，独立于可变 Session 状态卡，后续状态更新不覆盖开始字段。
@@ -248,7 +248,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书、微信与 QQ 的严格斜杠命令解析，并规范化四渠道共同公开的
 `/h`、`/work`、`/r`、`/skills` 别名；Telegram 在 Bot 注册边界接入同一组显式映射。
-`conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。共享发现策略隐藏 Queue／Goal 的帮助与 Telegram 菜单入口，不改变命令处理器准入；QQ、飞书静态菜单同样不展示两项。
+`conversation-command-catalog.ts` 保存规范命令的默认标签、描述及静态操作参数前缀；命令身份由 Application 类型约束。Queue／Goal 的用户命令、卡片和专属结果展示已移除；渠道输出使用的有界投递队列继续保留。
 飞书和 QQ 的静态菜单引用该目录，保留渠道标签覆盖、分组、行列与导航；Telegram 的注册说明直接消费目录，
 飞书、Telegram 和微信的文字帮助由 `conversation-command-help.ts` 的结构化用法生成；微信在帮助入口前置共享常用命令摘要，Telegram 默认打开按钮首页，“完整用法”保留共享摘要与完整说明。文字模型、工作区和会话清单的分段与状态语义由共享格式器维护，各端继续负责 HTML／Markdown 和实际消息发送；Telegram 历史／归档选择紧凑条目间距，其他消费者保留原默认间距。
 目录不是能力或授权表，不接收外部输入，不替代 QQ 的参数准入、飞书实际卡片的动作集合或任何交互守卫。

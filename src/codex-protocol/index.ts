@@ -46,6 +46,7 @@ export type { ThreadSettingsUpdateParams } from "./generated/v2/ThreadSettingsUp
 export type { ThreadSettingsUpdateResponse } from "./generated/v2/ThreadSettingsUpdateResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
+export type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 export type { DynamicToolSpec } from "./generated/v2/DynamicToolSpec.js";
 export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribeResponse.js";
 export type { ThreadArchiveResponse } from "./generated/v2/ThreadArchiveResponse.js";
@@ -69,23 +70,10 @@ export type { ReviewStartResponse } from "./generated/v2/ReviewStartResponse.js"
 export type { ReviewTarget } from "./generated/v2/ReviewTarget.js";
 export type { SkillsListResponse } from "./generated/v2/SkillsListResponse.js";
 export type { ThreadForkResponse } from "./generated/v2/ThreadForkResponse.js";
-export type { ThreadGoal } from "./generated/v2/ThreadGoal.js";
-export type { ThreadGoalGetResponse } from "./generated/v2/ThreadGoalGetResponse.js";
-export type { ThreadGoalSetResponse } from "./generated/v2/ThreadGoalSetResponse.js";
 export type { QueuedSubmission } from "./generated/v2/QueuedSubmission.js";
-export type { ThreadQueueAddParams } from "./generated/v2/ThreadQueueAddParams.js";
-export type { ThreadQueueAddResponse } from "./generated/v2/ThreadQueueAddResponse.js";
 export type { ThreadQueueChangedNotification } from "./generated/v2/ThreadQueueChangedNotification.js";
-export type { ThreadQueueDeleteParams } from "./generated/v2/ThreadQueueDeleteParams.js";
-export type { ThreadQueueDeleteResponse } from "./generated/v2/ThreadQueueDeleteResponse.js";
 export type { ThreadQueueListParams } from "./generated/v2/ThreadQueueListParams.js";
 export type { ThreadQueueListResponse } from "./generated/v2/ThreadQueueListResponse.js";
-export type { ThreadQueueReorderParams } from "./generated/v2/ThreadQueueReorderParams.js";
-export type { ThreadQueueReorderResponse } from "./generated/v2/ThreadQueueReorderResponse.js";
-export type { ThreadQueueStartParams } from "./generated/v2/ThreadQueueStartParams.js";
-export type { ThreadQueueStartResponse } from "./generated/v2/ThreadQueueStartResponse.js";
-export type { ThreadQueueUpdateParams } from "./generated/v2/ThreadQueueUpdateParams.js";
-export type { ThreadQueueUpdateResponse } from "./generated/v2/ThreadQueueUpdateResponse.js";
 
 export const protocolVersion = version;
 

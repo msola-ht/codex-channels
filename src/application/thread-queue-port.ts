@@ -1,25 +1,6 @@
-/**
- * A bounded, platform-independent view of an App Server Thread Queue item.
- *
- * Queue inputs are deliberately summarized at the Client boundary.  In
- * particular, this type never carries an App Server `UserInput`, local media
- * path, skill path, or mention path across the module boundary.
- */
-export type ThreadQueueInputType =
-  | "text"
-  | "image"
-  | "audio"
-  | "skill"
-  | "mention"
-  | "other";
+/** Read-only App Server queue state used for binding and Revert safety. */
 
-export type ThreadQueueFailure =
-  | "unavailable"
-  | "empty"
-  | "full"
-  | "busy"
-  | "item-not-found"
-  | "reorder-conflict";
+export type ThreadQueueFailure = "unavailable";
 
 /** A known rejection from the Queue authority, never a transport failure. */
 export class ThreadQueueError extends Error {
@@ -29,16 +10,8 @@ export class ThreadQueueError extends Error {
   }
 }
 
-export interface ThreadQueueItem {
-  id: string;
-  clientUserMessageId: string;
-  inputType: ThreadQueueInputType;
-  textPreview: string | null;
-  editable: boolean;
-}
-
 export interface ThreadQueuePage {
-  items: ThreadQueueItem[];
+  itemCount: number;
   nextCursor: string | null;
   /** Opaque digest of the complete ordered page returned by App Server. */
   fingerprint?: string;
@@ -51,42 +24,13 @@ export interface ThreadQueueListOptions {
 }
 
 /**
- * Narrow Application-owned Queue contract.  Writes are intentionally
- * expressed as text-only operations; other clients' non-text entries remain
- * manageable through their safe summaries, but cannot be edited here.
+ * Read-only native Queue contract for binding safety and Revert concurrency.
  * Local beforeSubmit guards run after asynchronous preparation and before
  * each RPC attempt; they never become protocol fields or cancel sent writes.
  */
 export interface ThreadQueuePort {
-  addQueueItem(
-    threadId: string,
-    text: string,
-    clientUserMessageId: string,
-    beforeSubmit?: () => void,
-  ): Promise<ThreadQueueItem>;
   listQueue(
     threadId: string,
     options?: ThreadQueueListOptions,
   ): Promise<ThreadQueuePage>;
-  updateQueueItem(
-    threadId: string,
-    queuedSubmissionId: string,
-    text: string,
-    beforeSubmit?: () => void,
-  ): Promise<ThreadQueueItem>;
-  deleteQueueItem(
-    threadId: string,
-    queuedSubmissionId: string,
-    beforeSubmit?: () => void,
-  ): Promise<{ deleted: boolean }>;
-  reorderQueue(
-    threadId: string,
-    queuedSubmissionIds: string[],
-    beforeSubmit?: () => void,
-  ): Promise<void>;
-  startQueueItem(
-    threadId: string,
-    queuedSubmissionId?: string,
-    beforeSubmit?: () => void,
-  ): Promise<{ turnId: string }>;
 }

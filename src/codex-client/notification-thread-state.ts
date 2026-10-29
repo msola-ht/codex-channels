@@ -10,7 +10,7 @@ import {
   nonEmptyString,
   strictNullableString,
 } from "./notification-parse-helpers.js";
-import { toThreadApprovalsReviewer } from "./thread-adapter.js";
+import { toThreadApprovalsReviewer, toThreadPermissionProfile, toThreadSandboxMode } from "./thread-adapter.js";
 
 type RoutingNotification = Extract<
   ServerNotification,
@@ -69,7 +69,7 @@ function toThreadNameUpdatedStateEvent(value: unknown): ThreadStateEvent | undef
   return parsed ? { type: "thread.name.updated", ...parsed } : undefined;
 }
 
-/** Queue changes only invalidate the local selector snapshot; they never trigger a read. */
+/** Queue changes invalidate Revert confirmations; they never trigger a read. */
 export function toThreadQueueChangedEvent(
   notification: RpcNotification,
 ): { threadId: string } | undefined {
@@ -90,6 +90,8 @@ function toThreadSettingsUpdatedEvent(
   const effort = strictNullableString(settings?.effort);
   const serviceTier = strictNullableString(settings?.serviceTier);
   const collaborationMode = parseCollaborationMode(settings?.collaborationMode);
+  const sandbox = toThreadSandboxMode(asRecord(settings?.sandboxPolicy)?.type);
+  const permissions = toThreadPermissionProfile(settings?.activePermissionProfile);
   if (
     !threadId
     || !cwd
@@ -104,6 +106,7 @@ function toThreadSettingsUpdatedEvent(
     type: "thread.settings.updated",
     threadId,
     cwd,
+    permissionContext: sandbox !== undefined && permissions !== undefined ? { sandbox, permissions } : undefined,
     settings: {
       model,
       effort: effort.value,

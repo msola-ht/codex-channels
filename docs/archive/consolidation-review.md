@@ -59,7 +59,7 @@ U16 的现行 IPC 边界与重新评估条件维护在 [Runtime 文档](../../ru
 
 证据入口：
 
-- [`thread-queue-service.ts`](../../src/application/thread-queue-service.ts)：`rememberSelectionSnapshot` 与数字选择器读取。
+- `thread-queue-service.ts`（历史文件 `src/application/thread-queue-service.ts`，现已删除）：`rememberSelectionSnapshot` 与数字选择器读取。
 - [`thread-revert-service.ts`](../../src/application/thread-revert-service.ts)：`rememberSelectionSnapshot`、`rememberConfirmation` 与页面选择校验。
 - [`conversation-hook-service.ts`](../../src/application/conversation-hook-service.ts)：`prune`、选择与确认上下文。
 - [`scheduled-task-service.ts`](../../src/application/scheduled-task-service.ts)：`rememberSnapshot`、`trimMap`、Task/Run 选择读取。
@@ -299,7 +299,7 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 
 **实施与证据。** 四入口已共用 ConversationService 私有 `withGuardedSelection`，保留锁内空闲检查、前后 Queue 读取，仅受控冲突清理本地待生效选择。Fast status 仍走锁外只读分支，Fast 默认设置写入、startPlan 与最终 Turn 的 Provider/活动状态守卫均未改变。手工调用编译产物并注入选择期间 Queue 冲突，观察顺序为 lock→idle→queue→selected→queue→clear，返回 queue.pending-overrides；目录普通失败仅执行 lock→idle→queue，原错返回且未清理。类型及构建通过。该观察仅覆盖局部保护，未使用真实模型目录、创建 Turn 或运行原生客户端并发，不能证明跨端原子性。
 
-证据入口：[`conversation-service.ts`](../../src/application/conversation-service.ts) 的 `togglePlanMode`、`selectModel`、`selectEffort`、`selectFastMode`（约 1362、1433、1450、1467 行），以及 [`thread-queue-service.ts`](../../src/application/thread-queue-service.ts) 的 `rejectPendingOverrideChange`。
+证据入口：[`conversation-service.ts`](../../src/application/conversation-service.ts) 的 `togglePlanMode`、`selectModel`、`selectEffort`、`selectFastMode`（约 1362、1433、1450、1467 行），以及 `thread-queue-service.ts`（历史文件 `src/application/thread-queue-service.ts`，现已删除） 的 `rejectPendingOverrideChange`。
 
 原先四处重复取得 Conversation 锁、要求空闲、选择前读取 Queue、执行异步选择、选择后再次读取 Queue，并在受控 queue.pending-overrides 冲突时清除待生效选择。后查必须保留：读取模型目录或预设期间，原生客户端可以改变 Queue，本地锁无法阻止。待生效选择最终经 startNewTurn/turnOverrides 传给 Client，维护的是同一“原生 Queue 与渠道待生效覆盖互斥”不变量。
 
@@ -313,7 +313,7 @@ ConversationService 已提取私有受保护选择操作，四入口提供具体
 
 **实施与证据。** Application 端口已定义 `ThreadQueueError`，六个 Client Queue RPC 只在请求拒绝处适配 `JsonRpcError(-32600)` 与锁定版本的精确文字（条目不存在保留官方动态 ID 后缀），响应转换及 Provider 路由失败不进入分类。命令、Revert、hasItems 与后台释放消费同一分类；后台 empty/unavailable 之后的活动与路由空闲复核保留。手工操作编译产物观察到官方 empty → queue.empty；同文普通 Error、错误码 -32603、附加未知后缀均原样传播并映射 queue.failed。类型、边界检查及构建通过。未连接用户 App Server、创建真实 Queue 或触发后台释放，真实 RPC 至渠道反馈尚未观察。
 
-证据入口：[`thread-queue-service.ts`](../../src/application/thread-queue-service.ts) 的 `queueUserFacingError`（约 349 行）和 `hasItems`；[`conversation-service.ts`](../../src/application/conversation-service.ts) 的 `dispatchNativeQueueBeforeRelease`（约 1861 行）；[`client.ts`](../../src/codex-client/client.ts) 的 Queue 请求和 [`provider-routing-client.ts`](../../src/codex-client/provider-routing-client.ts) 的转发。
+证据入口：`thread-queue-service.ts`（历史文件 `src/application/thread-queue-service.ts`，现已删除） 的 `queueUserFacingError`（约 349 行）和 `hasItems`；[`conversation-service.ts`](../../src/application/conversation-service.ts) 的 `dispatchNativeQueueBeforeRelease`（约 1861 行）；[`client.ts`](../../src/codex-client/client.ts) 的 Queue 请求和 [`provider-routing-client.ts`](../../src/codex-client/provider-routing-client.ts) 的转发。
 
 原先 Application 通过官方英文异常正文识别 unavailable、empty、full、busy、not-found 与 reorder-conflict；后台释放又单独匹配 queue is empty。普通命令、释放和 Revert Queue 读取因此依赖协议文字。官方证据来自锁定源码 83086188ae0614bd882818ff1aa23f3194962012，路径相对于其 codex-rs 目录：
 

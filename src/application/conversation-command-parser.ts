@@ -12,7 +12,6 @@ export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或�
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
 export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned>] [provider <名称>] [search <关键词>]";
 export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned>] [provider <名称>] [search <关键词>]";
-export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
 export const threadRevertCommandUsageText = "用法：/revert list [页码] | /revert <Turn ID 或当前列表序号> | /revert confirm <一次性令牌>";
 
 export interface McpDetailView {
@@ -135,60 +134,6 @@ export function toSessionQuery(view: SessionListView): {
     ...(view.filter !== "all" ? { filter: view.filter } : {}),
     ...(view.provider ? { provider: view.provider } : {}),
   };
-}
-
-export function parseThreadQueueOperation(input: string):
-  | { type: "add"; text: string }
-  | { type: "list"; page: number }
-  | { type: "update"; selector: string; text: string }
-  | { type: "delete"; selector: string }
-  | { type: "reorder"; selector: string; position: number }
-  | { type: "start"; selector?: string } {
-  const normalized = input.trim();
-  const commandMatch = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(normalized);
-  const command = commandMatch?.[1];
-  const rest = commandMatch?.[2]?.trim() ?? "";
-  const usage = (): never => {
-    throw new UserFacingError("queue.usage", threadQueueCommandUsageText);
-  };
-  if (command === "add") {
-    return rest ? { type: "add", text: rest } : usage();
-  }
-  if (command === "list") {
-    const page = rest === "" ? 1 : Number(rest);
-    if (Number.isSafeInteger(page) && page >= 1 && page <= 4) {
-      return { type: "list", page };
-    }
-    return usage();
-  }
-  if (command === "update") {
-    const match = /^(\S+)(?:\s+([\s\S]+))$/u.exec(rest);
-    const selector = match?.[1]?.trim() ?? "";
-    const text = match?.[2]?.trim() ?? "";
-    return selector && text ? { type: "update", selector, text } : usage();
-  }
-  if (command === "delete" && /^\S+$/u.test(rest)) {
-    return { type: "delete", selector: rest };
-  }
-  if (command === "reorder") {
-    const match = /^(\S+)\s+(\S+)$/u.exec(rest);
-    const position = Number(match?.[2]);
-    if (
-      match?.[1]?.trim()
-      && Number.isSafeInteger(position)
-      && position >= 1
-      && position <= 100
-    ) {
-      return { type: "reorder", selector: match[1], position };
-    }
-    return usage();
-  }
-  if (command === "start" && (rest === "" || /^\S+$/u.test(rest))) {
-    return rest === ""
-      ? { type: "start" }
-      : { type: "start", selector: rest };
-  }
-  return usage();
 }
 
 export function parseThreadRevertOperation(input: string):

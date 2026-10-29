@@ -1,12 +1,11 @@
 import type { UserInput } from "../codex-protocol/index.js";
-import type { ThreadQueueInputType } from "../application/index.js";
+import type { ThreadHistoryInputType } from "../application/index.js";
 
 export const maximumUserInputPreviewCharacters = 160;
 
 export interface UserInputSummary {
-  inputType: ThreadQueueInputType;
+  inputType: ThreadHistoryInputType;
   textPreview: string | null;
-  editable: boolean;
 }
 
 /** Produce a bounded summary without exposing paths or protocol payloads. */
@@ -15,17 +14,17 @@ export function summarizeUserInput(input: UserInput[]): UserInputSummary {
     const first = input[0]!;
     switch (first.type) {
       case "text":
-        return { inputType: "text", textPreview: boundedUserInputText(first.text), editable: true };
+        return { inputType: "text", textPreview: boundedUserInputText(first.text) };
       case "image":
       case "localImage":
-        return { inputType: "image", textPreview: null, editable: false };
+        return { inputType: "image", textPreview: null };
       case "audio":
       case "localAudio":
-        return { inputType: "audio", textPreview: null, editable: false };
+        return { inputType: "audio", textPreview: null };
       case "skill":
-        return { inputType: "skill", textPreview: null, editable: false };
+        return { inputType: "skill", textPreview: null };
       case "mention":
-        return { inputType: "mention", textPreview: null, editable: false };
+        return { inputType: "mention", textPreview: null };
     }
   }
   const text = input
@@ -35,7 +34,6 @@ export function summarizeUserInput(input: UserInput[]): UserInputSummary {
   return {
     inputType: "other",
     textPreview: text ? boundedUserInputText(text) : null,
-    editable: false,
   };
 }
 

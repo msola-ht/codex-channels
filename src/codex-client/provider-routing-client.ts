@@ -1,5 +1,7 @@
 import type { CodexAppServerClient } from "./client.js";
 import type { ApprovalRequest } from "../approval/index.js";
+import type { GenerateThreadTitleRequest, GenerateThreadTitleResult,
+  SetGeneratedThreadNameRequest, SetGeneratedThreadNameResult } from "../application/index.js";
 import type { InitializeResponse } from "../codex-protocol/index.js";
 import {
   JsonRpcError,
@@ -28,21 +30,19 @@ type ProviderClientMethod =
   | "unarchiveThread"
   | "startTurn"
   | "steerTurn"
-  | "addQueueItem"
   | "listQueue"
-  | "updateQueueItem"
-  | "deleteQueueItem"
-  | "reorderQueue"
-  | "startQueueItem"
   | "listThreadTurns"
   | "revertThread"
   | "interruptTurn"
   | "setThreadName"
+  | "generateThreadTitle"
+  | "setGeneratedThreadName"
+  | "cancelThreadTitleRequests"
+  | "waitForThreadTitleCleanup"
+  | "getThreadTitleDiagnostics"
   | "setThreadPinned"
   | "compactThread"
   | "listModels"
-  | "lunaReserveModel"
-  | "updateLunaReserveThreadSettings"
   | "updateThreadApprovalsReviewer"
   | "writeDefaultServiceTier"
   | "readDefaultReasoningEffort"
@@ -70,10 +70,7 @@ type ProviderClientMethod =
   | "openAiAccountRoute"
   | "accountThreadUsage"
   | "accountRateLimits"
-  | "listPermissionProfiles"
-  | "getGoal"
-  | "setGoal"
-  | "clearGoal";
+  | "listPermissionProfiles";
 
 export type ProviderClientInstance = Pick<CodexAppServerClient, ProviderClientMethod>
   & Partial<Pick<CodexAppServerClient, "cancelPendingInput">>;
@@ -283,6 +280,52 @@ export class ProviderRoutingClient {
   knownProvider(threadId: string): string | undefined {
     const provider = this.threadProviders.get(threadId);
     return provider === undefined ? undefined : this.canonicalProvider(provider);
+  }
+
+  async generateThreadTitle(request: GenerateThreadTitleRequest): Promise<GenerateThreadTitleResult> {
+    const provider = this.knownProvider(request.threadId);
+    if (!provider || this.canonicalProvider(request.modelProvider) !== provider || !this.connectedProviders.has(provider)) {
+      return { type: "skipped", reason: "provider-unconfirmed" };
+    }
+    const admission = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, request.deadlineMs - Date.now()))]);
+    return this.withProviderActivity(provider, async () => {
+      admission.throwIfAborted();
+      request.beforeSubmit();
+      // Optional title work uses the already subscribed instance. ensureClient may
+      // refresh Hooks through ordinary 60s RPCs and cannot fit this stage budget.
+      if (!this.connectedProviders.has(provider)) return { type: "skipped" as const, reason: "provider-unavailable" };
+      const client = this.clientForProvider(provider);
+      admission.throwIfAborted();
+      return client.generateThreadTitle(request);
+    }, admission);
+  }
+
+  async setGeneratedThreadName(request: SetGeneratedThreadNameRequest): Promise<SetGeneratedThreadNameResult> {
+    const provider = this.knownProvider(request.threadId);
+    if (!provider || !this.connectedProviders.has(provider)) return { type: "unconfirmed" };
+    const admission = AbortSignal.timeout(Math.max(1, request.deadlineMs - Date.now()));
+    return this.withProviderActivity(provider, async () => {
+      admission.throwIfAborted();
+      request.beforeSubmit();
+      if (!this.connectedProviders.has(provider)) return { type: "unconfirmed" as const };
+      const client = this.clientForProvider(provider);
+      admission.throwIfAborted();
+      return client.setGeneratedThreadName(request);
+    }, admission);
+  }
+
+  cancelThreadTitleRequests(provider?: string): void {
+    for (const [id, client] of this.clients) {
+      if (provider === undefined || id === this.canonicalProvider(provider)) client.cancelThreadTitleRequests();
+    }
+  }
+
+  async waitForThreadTitleCleanup(deadlineMs: number): Promise<void> {
+    await Promise.all([...this.clients.values()].map(client => client.waitForThreadTitleCleanup(deadlineMs)));
+  }
+
+  threadTitleDiagnostics(provider: string): ReturnType<ProviderClientInstance["getThreadTitleDiagnostics"]> | undefined {
+    return this.clients.get(this.canonicalProvider(provider))?.getThreadTitleDiagnostics();
   }
 
   fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
@@ -569,40 +612,10 @@ export class ProviderRoutingClient {
     return this.callForThread(args[0], (client) => client.steerTurn(...args));
   }
 
-  addQueueItem(
-    ...args: Parameters<ProviderClientInstance["addQueueItem"]>
-  ): ReturnType<ProviderClientInstance["addQueueItem"]> {
-    return this.callForThread(args[0], (client) => client.addQueueItem(...args));
-  }
-
   listQueue(
     ...args: Parameters<ProviderClientInstance["listQueue"]>
   ): ReturnType<ProviderClientInstance["listQueue"]> {
     return this.callForThread(args[0], (client) => client.listQueue(...args));
-  }
-
-  updateQueueItem(
-    ...args: Parameters<ProviderClientInstance["updateQueueItem"]>
-  ): ReturnType<ProviderClientInstance["updateQueueItem"]> {
-    return this.callForThread(args[0], (client) => client.updateQueueItem(...args));
-  }
-
-  deleteQueueItem(
-    ...args: Parameters<ProviderClientInstance["deleteQueueItem"]>
-  ): ReturnType<ProviderClientInstance["deleteQueueItem"]> {
-    return this.callForThread(args[0], (client) => client.deleteQueueItem(...args));
-  }
-
-  reorderQueue(
-    ...args: Parameters<ProviderClientInstance["reorderQueue"]>
-  ): ReturnType<ProviderClientInstance["reorderQueue"]> {
-    return this.callForThread(args[0], (client) => client.reorderQueue(...args));
-  }
-
-  startQueueItem(
-    ...args: Parameters<ProviderClientInstance["startQueueItem"]>
-  ): ReturnType<ProviderClientInstance["startQueueItem"]> {
-    return this.callForThread(args[0], (client) => client.startQueueItem(...args));
   }
 
   listThreadTurns(
@@ -738,24 +751,6 @@ export class ProviderRoutingClient {
     return threadId
       ? this.callForThread(threadId, (client) => client.readMcpResource(...args), args[3])
       : this.withPrimaryActivity((client) => client.readMcpResource(...args), args[3]);
-  }
-
-  getGoal(
-    ...args: Parameters<ProviderClientInstance["getGoal"]>
-  ): ReturnType<ProviderClientInstance["getGoal"]> {
-    return this.callForThread(args[0], (client) => client.getGoal(...args), args[1]);
-  }
-
-  setGoal(
-    ...args: Parameters<ProviderClientInstance["setGoal"]>
-  ): ReturnType<ProviderClientInstance["setGoal"]> {
-    return this.callForThread(args[0], (client) => client.setGoal(...args), args[2]);
-  }
-
-  clearGoal(
-    ...args: Parameters<ProviderClientInstance["clearGoal"]>
-  ): ReturnType<ProviderClientInstance["clearGoal"]> {
-    return this.callForThread(args[0], (client) => client.clearGoal(...args), args[1]);
   }
 
   listCollaborationModes(
@@ -948,21 +943,6 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["accountRateLimits"]>
   ): ReturnType<ProviderClientInstance["accountRateLimits"]> {
     return this.withPrimaryActivity((client) => client.accountRateLimits(...args), args[0]?.beforeSubmit);
-  }
-
-  lunaReserveModel(
-    ...args: Parameters<ProviderClientInstance["lunaReserveModel"]>
-  ): ReturnType<ProviderClientInstance["lunaReserveModel"]> {
-    return this.withPrimaryActivity((client) => client.lunaReserveModel(...args));
-  }
-
-  updateLunaReserveThreadSettings(
-    ...args: Parameters<ProviderClientInstance["updateLunaReserveThreadSettings"]>
-  ): ReturnType<ProviderClientInstance["updateLunaReserveThreadSettings"]> {
-    return this.callForThread(
-      args[0],
-      (client) => client.updateLunaReserveThreadSettings(...args),
-    );
   }
 
   updateThreadApprovalsReviewer(

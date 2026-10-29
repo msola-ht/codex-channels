@@ -66,14 +66,10 @@ import {
   telegramHelpKeyboard,
   threadAutoReviewKeyboard,
   scheduledTaskConfirmationKeyboard,
-  formatTelegramThreadQueueDeleteConfirmation,
-  formatTelegramThreadQueueItemAction,
   telegramModelSelectionToken,
   telegramResetCreditListToken,
   replyTelegramPanel,
   telegramPluginSelectionToken,
-  threadQueueDeleteConfirmationKeyboard,
-  threadQueueItemKeyboard,
   telegramWorkspaceSwitchToken,
 } from "./command-renderer.js";
 import { TelegramInteractionPort } from "./interactions.js";
@@ -323,10 +319,12 @@ export class TelegramSurface {
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputBatcher(
-      (inputTarget, input, actorId) => service.submit(
+      (inputTarget, input, actorId, titleInput) => service.submit(
         inputTarget,
         input,
         () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+        undefined,
+        titleInput,
       ),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
@@ -678,9 +676,34 @@ export class TelegramSurface {
         return;
       }
       this.idleResumeSelections.delete(token);
+      const original = this.commandReplies.get(context);
+      const scope = this.commandReplyScope(callbackTarget);
+      const assertScope = (): void => {
+        const current = this.commandReplyScope(callbackTarget);
+        if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
+          || current.threadId !== scope.threadId || current.selectionScope !== scope.selectionScope) {
+          throw new UserFacingError("command.authorization-changed", "恢复按钮所属会话已变化，请重新发送 /r 命令。");
+        }
+      };
       await context.answerCallbackQuery({ text: "正在恢复会话" });
-      if (this.stopping || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) return;
-      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId);
+      const assertActive = (): void => {
+        if (!original || original.signal.aborted || this.stopping || pending.expiresAt <= this.now()
+          || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) {
+          throw new UserFacingError("command.authorization-changed", "恢复按钮已失效，请使用通知中的 /r 命令。");
+        }
+      };
+      assertActive();
+      assertScope();
+      await this.outbox.runOrdered(callbackTarget.conversationId, signal => this.apiExecutor.call({
+        chatId: callbackTarget.conversationId, operation: "sendMessage", critical: true,
+      }, requestSignal => {
+        assertActive();
+        assertScope();
+        return context.reply(`/r ${pending.threadId}`, { disable_notification: true }, telegramAbortSignal(requestSignal));
+      }, signal));
+      assertActive();
+      assertScope();
+      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId, assertActive);
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "空闲恢复按钮清理失败"); }
       await this.renderCommandResult(context, result);
@@ -971,115 +994,6 @@ export class TelegramSurface {
         });
       },
     );
-    this.bot.callbackQuery(/^queue:(?:page|refresh):([1-9]\d*)$/, async (context) => {
-      await context.answerCallbackQuery({ text: "正在加载 Queue" });
-      const result = await this.commands.execute(
-        target(context),
-        "queue",
-        `list ${context.match[1]}`,
-        String(context.from.id),
-      );
-      await this.renderCommandResult(
-        context,
-        result,
-      );
-    });
-    this.bot.callbackQuery(
-      /^queue:item:([1-9]\d*):([A-Za-z0-9_-]{1,52})$/,
-      async (context) => {
-        const page = context.match[1]!;
-        const itemId = context.match[2]!;
-        const result = await this.commands.execute(
-          target(context),
-          "queue",
-          `list ${page}`,
-          String(context.from.id),
-        );
-        if (result.kind !== "thread-queue") {
-          throw new UserFacingError(
-            "queue.item-not-found",
-            "Queue 条目按钮已失效，请刷新 /queue list",
-          );
-        }
-        const item = result.result.items.find((candidate) => candidate.id === itemId);
-        if (!item) {
-          throw new UserFacingError(
-            "queue.item-not-found",
-            "Queue 条目按钮已失效，请刷新 /queue list",
-          );
-        }
-        await context.answerCallbackQuery({ text: "已打开 Queue 条目" });
-        await replyTelegramPanel(
-          context,
-          formatTelegramThreadQueueItemAction(item),
-          threadQueueItemKeyboard(Number(page), item.id),
-        );
-      },
-    );
-    this.bot.callbackQuery(
-      /^queue:start:([1-9]\d*):([A-Za-z0-9_-]{1,52})$/,
-      async (context) => {
-        await context.answerCallbackQuery({ text: "正在启动 Queue 条目" });
-        const result = await this.commands.execute(
-          target(context),
-          "queue",
-          `start ${context.match[2]}`,
-          String(context.from.id),
-        );
-        await this.renderCommandResult(
-          context,
-          result,
-        );
-      },
-    );
-    this.bot.callbackQuery(
-      /^queue:delete-confirm:([1-9]\d*):([A-Za-z0-9_-]{1,52})$/,
-      async (context) => {
-        const page = Number(context.match[1]);
-        const itemId = context.match[2]!;
-        const result = await this.commands.execute(
-          target(context),
-          "queue",
-          `list ${page}`,
-          String(context.from.id),
-        );
-        if (result.kind !== "thread-queue") {
-          throw new UserFacingError(
-            "queue.item-not-found",
-            "Queue 条目按钮已失效，请刷新 /queue list",
-          );
-        }
-        const item = result.result.items.find((candidate) => candidate.id === itemId);
-        if (!item) {
-          throw new UserFacingError(
-            "queue.item-not-found",
-            "Queue 条目按钮已失效，请刷新 /queue list",
-          );
-        }
-        await context.answerCallbackQuery({ text: "请确认删除" });
-        await replyTelegramPanel(
-          context,
-          formatTelegramThreadQueueDeleteConfirmation(item),
-          threadQueueDeleteConfirmationKeyboard(page, item.id),
-        );
-      },
-    );
-    this.bot.callbackQuery(
-      /^queue:delete:([1-9]\d*):([A-Za-z0-9_-]{1,52})$/,
-      async (context) => {
-        await context.answerCallbackQuery({ text: "正在删除 Queue 条目" });
-        const result = await this.commands.execute(
-          target(context),
-          "queue",
-          `delete ${context.match[2]}`,
-          String(context.from.id),
-        );
-        await this.renderCommandResult(
-          context,
-          result,
-        );
-      },
-    );
     this.bot.on("message:text", async (context) => {
       if (context.message.entities?.some(
         (entity) => entity.type === "bot_command" && entity.offset === 0,
@@ -1149,6 +1063,7 @@ export class TelegramSurface {
             context.message.text,
             telegramQuotedText(context.message.reply_to_message),
           ),
+          titleInput: { text: context.message.text, source: "task" },
         });
       } catch (error) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -1270,6 +1185,9 @@ export class TelegramSurface {
     const submitAttachment = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      "video",
+      undefined,
+      caption?.trim() ? { actorId, text: caption, source: "caption" } : undefined,
     );
     if (submitAttachment === undefined) {
       await context.reply("此 Gateway 的视频会话提交入口未就绪，请稍后重新发送。");
@@ -1388,6 +1306,7 @@ export class TelegramSurface {
         actorId: String(context.from?.id ?? ""),
         sequence,
         text,
+        ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
       });
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -1461,6 +1380,7 @@ export class TelegramSurface {
                   quotedText,
                 ),
               }),
+        ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
         localImages: [{
           path: image.path,
           mimeType: image.mimeType,
@@ -1510,6 +1430,8 @@ export class TelegramSurface {
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
       "audio",
+      undefined,
+      caption?.trim() ? { actorId, text: caption, source: "caption" } : undefined,
     );
     if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
     try {
@@ -1673,9 +1595,6 @@ export class TelegramSurface {
     // scope, including browse-only changes. Status refreshes also carry it.
     if (result.kind === "models") scope = { ...scope, selectionScope: result.state.selectionScope,
       threadId: this.service.status(inputTarget).threadId };
-    // Reading Goal may create the first Thread. Keep its authoritative source
-    // instead of treating that preparation as an unrelated binding change.
-    if (result.kind === "goal") scope = { ...scope, threadId: result.threadId };
     if (result.kind === "status") {
       if (result.status.workspaceId !== scope.workspaceId || result.status.cwd !== scope.cwd || result.status.threadId !== scope.threadId) {
         throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
@@ -1821,7 +1740,8 @@ export class TelegramSurface {
         ? "video" : undefined;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(inputTarget, allowed, kind,
-      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind));
+      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind, undefined,
+        message.caption?.trim() ? { actorId, text: message.caption, source: "caption" } : undefined));
     this.receivedAttachments.set(update, receipt);
     return () => { receipt.dispose(); this.receivedAttachments.delete(update); };
   }

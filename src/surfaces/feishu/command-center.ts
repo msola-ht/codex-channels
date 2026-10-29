@@ -40,7 +40,6 @@ const feishuLocalCommandActions = [
   "whoami",
   "feishu-status",
   "feishu-doctor",
-  "goal-set",
   "review-branch",
   "review-commit",
   "review-custom",
@@ -123,6 +122,7 @@ interface PendingCommandCenter {
   selectPage?: (page: number) => FeishuCommandCenterChoices;
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
+  idleResumeThreadId?: string;
   limitsQueryInFlight?: boolean;
   assertActive?: () => void;
 }
@@ -152,7 +152,7 @@ export class FeishuCommandCenter {
   private readonly cancellation = new AbortController();
 
   constructor(
-    private readonly outbox: Pick<FeishuOutbox, "deliverCard">
+    private readonly outbox: Pick<FeishuOutbox, "deliverCard" | "deliverText">
       & Partial<Pick<FeishuOutbox, "updateCard">>,
     private readonly access: SurfaceAccessPolicy,
     private readonly execute: (
@@ -164,6 +164,7 @@ export class FeishuCommandCenter {
       assertActive?: () => void,
     ) => Promise<FeishuCommandCenterResponse | void>,
     private readonly logger: Logger,
+    private readonly captureIdleResumeScope: (target: ConversationTarget) => () => void,
     options: FeishuCommandCenterOptions = {},
   ) {
     this.tokenTtlMs = options.tokenTtlMs ?? 10 * 60_000;
@@ -180,7 +181,7 @@ export class FeishuCommandCenter {
     target: ConversationTarget,
     actorId: string,
   ): Promise<void> {
-    return this.openCard(
+    await this.openCard(
       target,
       actorId,
       renderFeishuCommandCenterCard,
@@ -202,7 +203,7 @@ export class FeishuCommandCenter {
         throw new UserFacingError("command.authorization-changed", "选择卡片已过期，请重新打开");
       }
     } : undefined;
-    return this.openCard(
+    await this.openCard(
       target,
       actorId,
       (token) => "choices" in response
@@ -275,11 +276,12 @@ export class FeishuCommandCenter {
       if (this.closed || !this.access.isAllowed({ target, actorId })) {
         throw new Error("空闲解除通知接收者已不可用");
       }
-      await this.openCard(
+      const pending = await this.openCard(
         target, actorId,
         token => renderFeishuConversationIdleReleasedCard(minutes, threadId, token),
         undefined, true, new Map(), this.tokenTtlMs, sendCard,
       );
+      if (pending) pending.idleResumeThreadId = threadId;
     })());
   }
 
@@ -298,7 +300,7 @@ export class FeishuCommandCenter {
     selectionGuard?: () => void,
     selectPage?: (page: number) => FeishuCommandCenterChoices,
     expiresAt?: number,
-  ): Promise<void> {
+  ): Promise<PendingCommandCenter | undefined> {
     assertActive?.();
     if (
       this.closed
@@ -324,7 +326,7 @@ export class FeishuCommandCenter {
     if (this.closed || !this.access.isAllowed({ target, actorId })) {
       return;
     }
-    this.pending.set(token, {
+    const pending: PendingCommandCenter = {
       target,
       actorId,
       messageId,
@@ -336,13 +338,15 @@ export class FeishuCommandCenter {
       ...(form ? { form } : {}),
       consumeOnUse,
       ...(selectionGuard ? { assertActive: selectionGuard } : {}),
-    });
+    };
+    this.pending.set(token, pending);
     while (this.pending.size > this.capacity) {
       const first = this.pending.entries().next();
       if (first.done) break;
       this.expiredActions.remember(first.value[0], first.value[1], this.now());
       this.pending.delete(first.value[0]);
     }
+    return pending;
   }
 
   openFromMenu(
@@ -515,13 +519,37 @@ export class FeishuCommandCenter {
               renderFeishuCategorizedCommandsCard,
             );
           } else {
+            const assertIdleResumeScope = pending.idleResumeThreadId === undefined
+              ? undefined : this.captureIdleResumeScope(pending.target);
+            const assertIdleResumeActive = pending.idleResumeThreadId === undefined ? undefined : (): void => {
+              if (this.closed || pending.expiresAt <= this.now()
+                || !this.access.isAllowed({ target: pending.target, actorId: pending.actorId })) {
+                throw new UserFacingError("command.authorization-changed", "恢复按钮已失效，请使用通知中的 /r 命令。");
+              }
+            };
+            if (assertIdleResumeActive) {
+              assertIdleResumeActive();
+              const receipt = new DeliveryReceipt(async () => {}, this.cancellation.signal, true, () => {
+                assertIdleResumeActive();
+                assertIdleResumeScope?.();
+              });
+              receipt.requireConfirmation();
+              try {
+                await receipt.run(() => this.outbox.deliverText(
+                  pending.target.conversationId, `/r ${pending.idleResumeThreadId}`,
+                ));
+              } finally { receipt.release(); }
+              await receipt.done;
+              assertIdleResumeActive();
+              assertIdleResumeScope?.();
+            }
             const response = await this.execute(
               pending.target,
               resolvedCommand,
               pending.actorId,
               submittedInput!,
               modelSelection,
-              assertUsageActive,
+              assertUsageActive ?? assertIdleResumeActive,
             );
             modelSelection?.assertActive();
             if (response) {
@@ -900,10 +928,6 @@ function commandCenterActionConsumesToken(
 ): boolean {
   return directStateChangingActions.has(action)
     || action === "thread-autoreview-select"
-    || (
-      action === "queue"
-      && /^(?:start|delete)\s+/u.test(input)
-    )
     || (
       action === "schedule"
       && /^(?:confirm|pause|resume|run|retry)\s+/u.test(input)

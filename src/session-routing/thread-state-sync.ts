@@ -1,4 +1,5 @@
 import type { SessionRouter, ThreadModelSettings } from "./router.js";
+import type { ThreadPermissionContext } from "./thread-port.js";
 
 export type ThreadStateEvent =
   | {
@@ -6,6 +7,7 @@ export type ThreadStateEvent =
       threadId: string;
       settings: ThreadModelSettings;
       cwd: string;
+      permissionContext?: ThreadPermissionContext | undefined;
     }
   | { type: "thread.name.updated"; threadId: string; name: string | null }
   | { type: "thread.archived"; threadId: string }
@@ -19,6 +21,7 @@ export class ThreadStateSynchronizer {
   observeExecutionContext(event: ThreadStateEvent): (() => boolean) | undefined {
     if (event.type === "thread.settings.updated") {
       this.router.observeThreadCwd(event.threadId, event.cwd);
+      this.router.observeThreadPermissions(event.threadId, event.permissionContext);
       this.router.updateModelSettings(event.threadId, event.settings);
     }
     else if (event.type === "thread.closed") return this.router.markThreadUnsubscribed(event.threadId);

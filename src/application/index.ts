@@ -48,7 +48,6 @@ export {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
-  threadQueueCommandUsageText,
   threadRevertCommandUsageText,
   scheduledTaskCommandUsageText,
   type ConversationCommandName,
@@ -92,7 +91,7 @@ export {
   type ConversationAccountMetricsUseCases,
   type ConversationExtensionUseCases,
   type ConversationQueryPort,
-  type ConversationQueueRevertUseCases,
+  type ConversationRevertUseCases,
   type ConversationResumeResult,
   type ConversationSession,
   type ConversationSessionUseCases,
@@ -101,24 +100,13 @@ export {
   type ConversationTransferPort,
   type ConversationTurnUseCases,
   type PreparedAttachmentSubmission,
-  type ThreadQueueListResult,
-  type ThreadQueueReorderResult,
   type Submission,
   type WorkspaceStatusPort,
 } from "./conversation-service.js";
 export { resolveThread } from "./conversation-session-query-service.js";
 export type { SubmissionObserver, SubmissionPreparation, SubmissionOutcome } from "./submission-observer.js";
 export { SubmissionObservation } from "./submission-observer.js";
-export { parseThreadQueueOperation } from "./conversation-command-parser.js";
 export { parseScheduledTaskOperation } from "./scheduled-task-command.js";
-export {
-  QueueSubmissionObservation,
-  type QueuePreparation,
-  type QueueSubmissionConfirmation,
-  type QueueSubmissionOutcome,
-  type ThreadQueueSubmissionObserver,
-  type ThreadQueueExecutionContext,
-} from "./thread-queue-observer.js";
 export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,
@@ -137,15 +125,6 @@ export {
   type ModelSelectionState,
   type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";
-export {
-  lunaReserveModel,
-  type LunaReservePort,
-  type LunaReserveThreadSettings,
-} from "./luna-reserve-port.js";
-export {
-  LunaReserveService,
-  type LunaReserveServiceOptions,
-} from "./luna-reserve-service.js";
 export {
   type ModelInputModality,
   type ModelMultiAgentVersion,
@@ -208,10 +187,8 @@ export {
   type TurnRequestMetricsSummary,
 } from "./request-metrics-port.js";
 export {
-  type GoalStatus,
   type ReviewStarted,
   type ReviewTarget,
-  type ThreadGoal,
   type TurnCollaborationMode,
   type TurnExecutionPort,
   type ThreadApprovalsReviewerPort,
@@ -222,14 +199,13 @@ export {
 export {
   ThreadQueueError,
   type ThreadQueueFailure,
-  type ThreadQueueInputType,
-  type ThreadQueueItem,
   type ThreadQueueListOptions,
   type ThreadQueuePage,
   type ThreadQueuePort,
 } from "./thread-queue-port.js";
 export {
   type ThreadHistoryPort,
+  type ThreadHistoryInputType,
   type ThreadHistorySortDirection,
   type ThreadRevertListResult,
   type ThreadRevertPreview,
@@ -250,3 +226,7 @@ export { OpenAiResetCreditService, ResetCreditError, type OpenAiResetCredit, typ
 export { ConversationResetCreditService, resetCreditCommandUsage, type ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 export { ReasoningRepeatGuard, type ReasoningGuardInput } from "./reasoning-repeat-guard.js";
 export { calculateCloudUsageEstimates, type CloudUsageEstimates, type CloudUsageView } from "./cloud-usage-estimates.js";
+export { threadTitleInputDigest, type TitleInputContext, type CompletedThreadTitleInput,
+  type GenerateThreadTitleRequest, type GenerateThreadTitleResult, type SetGeneratedThreadNameRequest,
+  type SetGeneratedThreadNameResult, type ThreadTitlePort } from "./thread-title-port.js";
+export { ThreadTitleService, type ThreadTitleAuthorization } from "./thread-title-service.js";

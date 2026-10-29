@@ -1,5 +1,6 @@
 import type { ThreadSnapshot } from "../session-routing/index.js";
-import type { ThreadQueueInputType } from "./thread-queue-port.js";
+
+export type ThreadHistoryInputType = "text" | "image" | "audio" | "skill" | "mention" | "other";
 
 export type ThreadHistorySortDirection = "asc" | "desc";
 
@@ -9,7 +10,7 @@ export interface ThreadTurnSummary {
   startedAt: number | null;
   completedAt: number | null;
   durationMs: number | null;
-  inputType: ThreadQueueInputType | null;
+  inputType: ThreadHistoryInputType | null;
   textPreview: string | null;
 }
 

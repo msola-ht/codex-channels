@@ -2,7 +2,6 @@ import { parseCloudUsageQuery } from "./cloud-usage-query.js";
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import type { HookCommandView } from "./hook-port.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
-import { QueueSubmissionObservation, type ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -17,7 +16,6 @@ import {
   parseSessionListView,
   parseSkillInvocation,
   parseThreadRevertOperation,
-  parseThreadQueueOperation,
   toSessionQuery,
   type McpDetailView,
   type PluginListView,
@@ -26,11 +24,10 @@ import {
 import type {
   ConversationAccountMetricsUseCases,
   ConversationExtensionUseCases,
-  ConversationQueueRevertUseCases,
+  ConversationRevertUseCases,
   ConversationSessionUseCases,
   ConversationTurnUseCases,
 } from "./conversation-service.js";
-import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyIdentity, ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
   parseScheduledTaskOperation,
@@ -47,7 +44,6 @@ export {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
-  threadQueueCommandUsageText,
   threadRevertCommandUsageText,
   type McpDetailView,
   type PluginListView,
@@ -68,7 +64,6 @@ export const conversationCommandNames = [
   "workspace",
   "autoreview",
   "stop",
-  "queue",
   "revert",
   "rename",
   "compact",
@@ -87,7 +82,6 @@ export const conversationCommandNames = [
   "permissions",
   "diff",
   "plan",
-  "goal",
   "agents",
   "release",
   "schedule",
@@ -106,7 +100,7 @@ export type ConversationCommandUseCases =
     ConversationSessionUseCases,
     "invalidateSessionDisplayCache" | "releaseIdle"
   >
-  & ConversationQueueRevertUseCases
+  & ConversationRevertUseCases
   & ConversationExtensionUseCases
   & Pick<
     ConversationAccountMetricsUseCases,
@@ -132,10 +126,6 @@ export type ConversationCommandResult =
       pageCount: number;
       matchedSessionCount: number;
       view: SessionListView;
-    }
-  | {
-      kind: "thread-queue";
-      result: Awaited<ReturnType<ConversationCommandUseCases["queueList"]>>;
     }
   | {
       kind: "thread-revert";
@@ -202,7 +192,6 @@ export type ConversationCommandResult =
       view: "diff";
       artifacts: ReturnType<ConversationCommandUseCases["artifacts"]>;
     }
-  | { kind: "goal"; threadId: string; goal: ThreadGoal | null }
   | { kind: "agents"; roles: Awaited<ReturnType<ConversationCommandUseCases["listAgentRoles"]>> }
   | {
       kind: "occupancy";
@@ -253,25 +242,6 @@ export type ConversationCommandOutcome =
       nextModel: ConversationModelSummary;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
-  | {
-      type: "thread-queue.added";
-      item: Awaited<ReturnType<ConversationCommandUseCases["queueAdd"]>>;
-    }
-  | {
-      type: "thread-queue.updated";
-      item: Awaited<ReturnType<ConversationCommandUseCases["queueUpdate"]>>;
-    }
-  | {
-      type: "thread-queue.deleted";
-      deleted: boolean;
-    }
-  | {
-      type: "thread-queue.reordered";
-      itemId: string;
-      position: number;
-      totalItemCount: number;
-    }
-  | { type: "thread-queue.started"; turnId: string }
   | { type: "thread.reverted"; threadId: string; beforeTurnId: string }
   | { type: "thread.renamed"; name: string }
   | { type: "thread.compaction-requested" }
@@ -295,11 +265,6 @@ export type ConversationCommandOutcome =
       roleName: string;
       turnId: string;
       steered: boolean;
-    }
-  | { type: "goal.cleared" }
-  | {
-      type: "goal.updated";
-      goal: ThreadGoal;
     }
   | {
       type:
@@ -341,7 +306,6 @@ export interface ConversationCommandExecutor {
     actorId: string,
     assertInteractionActive?: () => void,
     observer?: SubmissionObserver,
-    queueContext?: ThreadQueueExecutionContext,
     scheduledOperation?: ScheduledTaskOperationContext,
     expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult>;
@@ -427,17 +391,15 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     assertInteractionActive?: () => void,
     observer?: SubmissionObserver,
-    queueContext?: ThreadQueueExecutionContext,
     scheduledOperation?: ScheduledTaskOperationContext,
     expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
-    const queueObservation = queueContext?.submission ? new QueueSubmissionObservation(queueContext.submission) : undefined;
     try {
       const authorize = this.commandGuard(target, actorId, command === "workspace");
       const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
       assertAuthorized();
-      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, queueObservation, queueContext?.deleted, scheduledOperation, expectedRelease);
+      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, scheduledOperation, expectedRelease);
       try {
         if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
         else assertAuthorized();
@@ -460,8 +422,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       return result;
     } finally {
-      try { observation?.settle(); }
-      finally { queueObservation?.settle(); }
+      observation?.settle();
     }
   }
 
@@ -489,8 +450,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     assertAuthorized: () => void,
     observation?: SubmissionObservation,
-    queueObservation?: QueueSubmissionObservation,
-    onQueueDeleted?: ThreadQueueExecutionContext["deleted"],
     scheduledOperation?: ScheduledTaskOperationContext,
     expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
@@ -641,8 +600,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           outcome: { type: "turn.stop-requested", stopped },
         };
       }
-      case "queue":
-        return this.executeQueueCommand(target, argumentsText, assertAuthorized, queueObservation, onQueueDeleted);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
@@ -755,6 +712,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.task,
           assertAuthorized,
           observation,
+          { actorId, text: invocation.task, source: "task" },
         );
         return {
           kind: "outcome",
@@ -780,6 +738,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.task,
           assertAuthorized,
           observation,
+          { actorId, text: invocation.task, source: "task" },
         );
         return {
           kind: "outcome",
@@ -794,7 +753,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized, observation);
+        return this.executePluginCommand(target, argumentsText, actorId, assertAuthorized, observation);
       case "usage":
         return {
           kind: "usage",
@@ -838,7 +797,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation,
+            { actorId, text: argumentsText, source: "task" });
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -848,8 +808,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           kind: "collaboration-mode",
           state: await this.conversations.togglePlanMode(target, assertAuthorized),
         };
-      case "goal":
-        return this.goal(target, argumentsText, assertAuthorized);
       case "release": {
         const force = argumentsText === "force";
         if (argumentsText !== "" && !force) {
@@ -873,73 +831,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     );
   }
 
-  private async executeQueueCommand(
-    target: ConversationTarget,
-    input: string,
-    assertAuthorized: () => void,
-    observation?: QueueSubmissionObservation,
-    onDeleted?: ThreadQueueExecutionContext["deleted"],
-  ): Promise<ConversationCommandResult> {
-    const operation = parseThreadQueueOperation(input);
-    if (operation.type === "list") {
-      return {
-        kind: "thread-queue",
-        result: await this.conversations.queueList(target, operation.page, assertAuthorized),
-      };
-    }
-    if (operation.type === "add") {
-      return {
-        kind: "outcome",
-        outcome: {
-          type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized, observation),
-        },
-      };
-    }
-    if (operation.type === "update") {
-      return {
-        kind: "outcome",
-        outcome: {
-          type: "thread-queue.updated",
-          item: await this.conversations.queueUpdate(
-            target,
-            operation.selector,
-            operation.text,
-            assertAuthorized,
-          ),
-        },
-      };
-    }
-    if (operation.type === "delete") {
-      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized, onDeleted);
-      return {
-        kind: "outcome",
-        outcome: { type: "thread-queue.deleted", deleted: result.deleted },
-      };
-    }
-    if (operation.type === "reorder") {
-      const result = await this.conversations.queueReorder(
-        target,
-        operation.selector,
-        operation.position,
-        assertAuthorized,
-      );
-      return {
-        kind: "outcome",
-        outcome: {
-          type: "thread-queue.reordered",
-          itemId: result.itemId,
-          position: result.position,
-          totalItemCount: result.totalItemCount,
-        },
-      };
-    }
-    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized, observation);
-    return {
-      kind: "outcome",
-      outcome: { type: "thread-queue.started", turnId: result.turnId },
-    };
-  }
 
   private async executeRevertCommand(
     target: ConversationTarget,
@@ -1031,6 +922,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executePluginCommand(
     target: ConversationTarget,
     input: string,
+    actorId: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
   ): Promise<ConversationCommandResult> {
@@ -1057,6 +949,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       operation.task,
       assertAuthorized,
       observation,
+      { actorId, text: operation.task, source: "task" },
     );
     return {
       kind: "outcome",
@@ -1179,35 +1072,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
     }
-  }
-
-  private async goal(
-    target: ConversationTarget,
-    input: string,
-    assertAuthorized?: () => void,
-  ): Promise<ConversationCommandResult> {
-    if (input === "clear") {
-      await this.conversations.clearGoal(target, assertAuthorized);
-      return {
-        kind: "outcome",
-        outcome: { type: "goal.cleared" },
-      };
-    }
-    if (input.startsWith("set ")) {
-      const goal = await this.conversations.setGoal(target, input.slice(4), assertAuthorized);
-      return {
-        kind: "outcome",
-        outcome: { type: "goal.updated", goal },
-      };
-    }
-    if (input) {
-      throw new UserFacingError(
-        "goal.usage",
-        "Goal 参数无效",
-      );
-    }
-    const result = await this.conversations.getGoal(target, assertAuthorized);
-    return { kind: "goal", ...result };
   }
 }
 

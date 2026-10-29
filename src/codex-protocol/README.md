@@ -9,8 +9,9 @@
   `ConfigRequirementsReadResponse`、Hook 目录使用的稳定
   `HooksListParams` / `HooksListResponse` / `HookMetadata`、Hook 状态窄写入使用的稳定
   `ConfigBatchWriteParams`，用户设置保存状态使用的稳定 `ConfigWriteResponse`（仅投影状态与版本），当前 Thread 审批方式更新使用的稳定
-  `ThreadSettingsUpdateParams` / `ThreadSettingsUpdateResponse`，账户用量请求使用的
-  `GetAccountTokenUsageParams` 与响应类型、重置券消费 `ConsumeAccountRateLimitResetCreditParams` / `ConsumeAccountRateLimitResetCreditResponse`、包含后代关系查询的 `ThreadListParams`，以及原生 Queue、分页历史、Revert 请求/响应和通知类型；
+  `ThreadSettingsUpdateParams` / `ThreadSettingsUpdateResponse`，仅用于标题临时 Thread 完整工具隔离参数的
+  `ThreadStartParams`，账户用量请求使用的
+  `GetAccountTokenUsageParams` 与响应类型、重置券消费 `ConsumeAccountRateLimitResetCreditParams` / `ConsumeAccountRateLimitResetCreditResponse`、包含后代关系查询的 `ThreadListParams`，以及原生 Queue 只读安全查询、分页历史、Revert 请求/响应和通知类型；
   其他业务模块不得导入。
   `ItemGuardianApprovalReviewStartedNotification` / `ItemGuardianApprovalReviewCompletedNotification`
   仅用于自动审查指标及渠道状态的最小投影；其 UNSTABLE payload 属于 Auto-review 受控例外，不授予其他审批能力。
@@ -19,10 +20,11 @@
   从精确目标 CLI 自动刷新，合同检查同时约束用户设置审批值，禁止用内部协议枚举扩展公开入口。
 - `generated/`：由 `codex app-server generate-ts --experimental` 生成的类型，禁止手工修改，
   也不在其内部维护手写索引文档。业务层只允许使用锁定版本官方 Plan 模式所需的
-  `collaborationMode/list`、`turn/start.collaborationMode`、Luna Reserve 保留当前模式所需的
-  `thread/settings/update.collaborationMode`、Thread Queue、分页历史与 Revert，以及前台计划任务的
+  `collaborationMode/list`、`turn/start.collaborationMode`、Thread Queue 只读安全查询及变更通知、分页历史与 Revert，以及前台计划任务的
   `thread/start.dynamicTools` 与对应 `item/tool/call` 回调（仅顶层 `schedule_task`），
   图片上传账户与路由校验使用的 `account/read.workspaceRouting`，
+  标题临时 Thread 的显式空 `runtimeWorkspaceRoots` / `environments` / `selectedCapabilityRoots` / `dynamicTools`
+  与原 Permission Profile 继承（固定工具禁用配置及本地严格 schema 解析），
   Auto-review 用户设置受管限制判断使用的 `configRequirements/read.allowedApprovalsReviewers`
   只读字段（经 `ConfigRequirementsReadResponse` 受控导出），
   `item/autoApprovalReview/started|completed` 的身份、来源和状态最小投影，

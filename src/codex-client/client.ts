@@ -1,9 +1,7 @@
-import { lunaReserveModel, ThreadQueueError } from "../application/index.js";
 import type { ApprovalRequest } from "../approval/index.js";
 import { FileChangeApprovalContext } from "./file-change-approval-context.js";
 import type {
   ReviewTarget,
-  ThreadGoal,
   TurnExecutionPort,
   TurnInput,
   TurnOverrides,
@@ -33,19 +31,20 @@ import type {
   PermissionProfileOption,
   PermissionQueryPort,
   ThreadQueuePort,
-  ThreadQueueItem,
   ThreadQueueListOptions,
   ThreadQueuePage,
   ThreadHistoryPort,
   ThreadTurnsListOptions,
   ThreadTurnsPage,
   ThreadRevertResult,
-  LunaReservePort,
-  LunaReserveThreadSettings,
   ThreadApprovalsReviewerPort,
   HookConfigPort,
   HookCatalog,
   HookAction,
+  GenerateThreadTitleRequest,
+  GenerateThreadTitleResult,
+  SetGeneratedThreadNameRequest,
+  SetGeneratedThreadNameResult,
 } from "../application/index.js";
 import type {
   ConsumeAccountRateLimitResetCreditParams,
@@ -76,8 +75,6 @@ import type {
   ThreadArchiveResponse,
   ThreadDeleteResponse,
   ThreadForkResponse,
-  ThreadGoalGetResponse,
-  ThreadGoalSetResponse,
   ThreadListResponse,
   ThreadListParams,
   ThreadLoadedListResponse,
@@ -85,18 +82,8 @@ import type {
   ThreadReadResponse,
   ThreadSettingsUpdateParams,
   ThreadSettingsUpdateResponse,
-  ThreadQueueAddResponse,
-  ThreadQueueAddParams,
-  ThreadQueueDeleteResponse,
-  ThreadQueueDeleteParams,
   ThreadQueueListResponse,
   ThreadQueueListParams,
-  ThreadQueueReorderResponse,
-  ThreadQueueReorderParams,
-  ThreadQueueStartResponse,
-  ThreadQueueStartParams,
-  ThreadQueueUpdateResponse,
-  ThreadQueueUpdateParams,
   ThreadRevertResponse,
   ThreadTurnsListParams,
   ThreadTurnsListResponse,
@@ -137,7 +124,6 @@ import {
   toProtocolReviewTarget,
   toProtocolTurnInput,
   toReviewStarted,
-  toThreadGoal,
   toTurnStarted,
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
@@ -166,17 +152,13 @@ import { toPermissionProfilePage } from "./permission-adapter.js";
 import { toHookCatalog, toHookStateWrite } from "./hook-adapter.js";
 import {
   rethrowThreadQueueError,
-  toProtocolQueueText,
-  toThreadQueueAddResult,
-  toThreadQueueDeleteResult,
   toThreadQueuePage,
-  toThreadQueueStartResult,
-  toThreadQueueUpdateResult,
 } from "./queue-adapter.js";
 import {
   toThreadRevertResult,
   toThreadTurnsPage,
 } from "./history-adapter.js";
+import { setThreadNameRpc, ThreadTitleRequests, type ThreadTitleDiagnostics } from "./thread-title.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -192,7 +174,6 @@ export class CodexAppServerClient implements
   TurnExecutionPort,
   ModelSelectionPort,
   AccountQueryPort,
-  LunaReservePort,
   CollaborationModeQueryPort,
   SkillQueryPort,
   McpQueryPort,
@@ -207,18 +188,24 @@ export class CodexAppServerClient implements
   private readonly fileChanges = new FileChangeApprovalContext();
   private readonly pendingSettingsUpdates = new Set<() => void>();
   private readonly observedTurns = new Map<string, ObservedTurnState>();
+  private readonly titleRequests: ThreadTitleRequests;
 
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
     imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch;
       readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute> },
+    private readonly onThreadTitleRecovery?: (previous: ThreadTitleDiagnostics, current: ThreadTitleDiagnostics) => void,
   ) {
-    this.rpc.onNotification(notification => this.fileChanges.observe(notification));
-    this.rpc.onNotification(notification => this.observeTurnState(notification));
+    this.titleRequests = new ThreadTitleRequests(rpc);
+    this.setServerRequestHandler(() => Promise.reject(new JsonRpcError(-32601, "Unsupported server request")));
+    this.rpc.onNotification(notification => this.titleRequests.observe(notification));
+    this.onNotification(notification => this.fileChanges.observe(notification));
+    this.onNotification(notification => this.observeTurnState(notification));
     this.rpc.onDisconnect(() => {
       this.fileChanges.clear();
       this.observedTurns.clear();
+      this.titleRequests.disconnected();
     });
     this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
       signal => this.rpc.request<GetAuthStatusResponse>({
@@ -227,18 +214,33 @@ export class CodexAppServerClient implements
       }, { retryOverload: false, signal }), imageUploadHttp.readProviderUploadRoute) : undefined;
   }
 
-  connect(): Promise<InitializeResponse> {
-    return this.rpc.connect();
+  async connect(): Promise<InitializeResponse> {
+    const initialized = await this.rpc.connect();
+    await this.recoverThreadTitles();
+    return initialized;
   }
 
-  reconnect(): Promise<InitializeResponse> {
+  async reconnect(): Promise<InitializeResponse> {
+    this.titleRequests.cancel();
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     this.observedTurns.clear();
-    return this.rpc.reconnect();
+    const initialized = await this.rpc.reconnect();
+    await this.recoverThreadTitles();
+    return initialized;
+  }
+
+  private async recoverThreadTitles(): Promise<void> {
+    const previous = this.titleRequests.diagnostics();
+    await this.titleRequests.recover(Date.now() + 5_000);
+    if (previous.quarantined) {
+      try { this.onThreadTitleRecovery?.(previous, this.titleRequests.diagnostics()); }
+      catch { /* A diagnostic failure cannot invalidate an established connection. */ }
+    }
   }
 
   close(): Promise<void> {
+    this.titleRequests.cancel();
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     this.observedTurns.clear();
@@ -247,7 +249,13 @@ export class CodexAppServerClient implements
   }
 
   onNotification(handler: (notification: RpcNotification) => void): () => void {
-    return this.rpc.onNotification(handler);
+    return this.rpc.onNotification(notification => {
+      const params = asRecord(notification.params);
+      const thread = asRecord(params?.thread);
+      const threadId = nonEmptyString(params?.threadId) ?? nonEmptyString(thread?.id);
+      if (notification.method === "thread/started" && thread?.ephemeral === true && thread.threadSource === "thread_title") return;
+      if (!threadId || !this.titleRequests.handlesThread(threadId)) handler(notification);
+    });
   }
 
   onDisconnect(handler: (error: Error) => void): () => void {
@@ -255,8 +263,25 @@ export class CodexAppServerClient implements
   }
 
   setServerRequestHandler(handler: ServerRequestHandler): void {
-    this.rpc.setServerRequestHandler(handler);
+    this.rpc.setServerRequestHandler(request => {
+      const params = asRecord(request.params);
+      const threadId = nonEmptyString(params?.threadId) ?? nonEmptyString(params?.conversationId);
+      return threadId && this.titleRequests.handlesThread(threadId)
+        ? Promise.resolve(this.titleRequests.rejectInteraction(request)) : handler(request);
+    });
   }
+
+  generateThreadTitle(request: GenerateThreadTitleRequest): Promise<GenerateThreadTitleResult> {
+    return this.titleRequests.generate(request);
+  }
+
+  setGeneratedThreadName(request: SetGeneratedThreadNameRequest): Promise<SetGeneratedThreadNameResult> {
+    return this.titleRequests.setName(request);
+  }
+
+  cancelThreadTitleRequests(): void { this.titleRequests.cancel(); }
+  waitForThreadTitleCleanup(deadlineMs: number): Promise<void> { return this.titleRequests.wait(deadlineMs); }
+  getThreadTitleDiagnostics(): ThreadTitleDiagnostics { return this.titleRequests.diagnostics(); }
 
   fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
     return this.fileChanges.get(request.threadId, request.turnId, request.itemId);
@@ -728,23 +753,6 @@ export class CodexAppServerClient implements
     }, overrides.beforeSubmit);
   }
 
-  async addQueueItem(
-    threadId: string,
-    text: string,
-    clientUserMessageId: string,
-    beforeSubmit?: () => void,
-  ): Promise<ThreadQueueItem> {
-    const response = await this.rpc.request<ThreadQueueAddResponse>({
-      method: "thread/queue/add",
-      params: {
-        threadId,
-        input: toProtocolQueueText(text),
-        clientUserMessageId,
-      } satisfies ThreadQueueAddParams,
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
-    return toThreadQueueAddResult(response);
-  }
-
   async listQueue(
     threadId: string,
     options: ThreadQueueListOptions = {},
@@ -763,80 +771,10 @@ export class CodexAppServerClient implements
     }, { retryOverload: true, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) })
       .catch(rethrowThreadQueueError);
     const page = toThreadQueuePage(response);
-    if (page.items.length > limit) {
+    if (page.itemCount > limit) {
       throw new Error("Codex Queue 列表响应超过请求页大小");
     }
     return page;
-  }
-
-  async updateQueueItem(
-    threadId: string,
-    queuedSubmissionId: string,
-    text: string,
-    beforeSubmit?: () => void,
-  ): Promise<ThreadQueueItem> {
-    const response = await this.rpc.request<ThreadQueueUpdateResponse>({
-      method: "thread/queue/update",
-      params: {
-        threadId,
-        queuedSubmissionId,
-        input: toProtocolQueueText(text),
-      } satisfies ThreadQueueUpdateParams,
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
-    return toThreadQueueUpdateResult(response);
-  }
-
-  async deleteQueueItem(
-    threadId: string,
-    queuedSubmissionId: string,
-    beforeSubmit?: () => void,
-  ): Promise<{ deleted: boolean }> {
-    const response = await this.rpc.request<ThreadQueueDeleteResponse>({
-      method: "thread/queue/delete",
-      params: { threadId, queuedSubmissionId } satisfies ThreadQueueDeleteParams,
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
-    return toThreadQueueDeleteResult(response);
-  }
-
-  async reorderQueue(
-    threadId: string,
-    queuedSubmissionIds: string[],
-    beforeSubmit?: () => void,
-  ): Promise<void> {
-    await this.rpc.request<ThreadQueueReorderResponse>({
-      method: "thread/queue/reorder",
-      params: { threadId, queuedSubmissionIds } satisfies ThreadQueueReorderParams,
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
-  }
-
-  async startQueueItem(
-    threadId: string,
-    queuedSubmissionId?: string,
-    beforeSubmit?: () => void,
-  ): Promise<{ turnId: string }> {
-    let previous: ObservedTurnState | undefined;
-    const pending: ObservedTurnState = { type: "unknown" };
-    const response = await this.rpc.request<ThreadQueueStartResponse>({
-      method: "thread/queue/start",
-      params: {
-        threadId,
-        ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
-      } satisfies ThreadQueueStartParams,
-    }, { retryOverload: false, beforeSubmit: () => {
-      beforeSubmit?.();
-      previous = this.observedTurns.get(threadId);
-      this.rememberTurnState(threadId, pending);
-    } }).catch(rethrowThreadQueueError).catch((error: unknown) => {
-      // Background cleanup uses queue/start as a dispatch barrier. A confirmed
-      // empty queue did not start a Turn; restore only if no notification,
-      // reconnect or competing submission changed the pending observation.
-      if (error instanceof ThreadQueueError && error.failure === "empty"
-        && previous && this.observedTurns.get(threadId) === pending) {
-        this.rememberTurnState(threadId, previous);
-      }
-      throw error;
-    });
-    return toThreadQueueStartResult(response);
   }
 
   async steerTurn(
@@ -891,10 +829,7 @@ export class CodexAppServerClient implements
   }
 
   async setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void> {
-    await this.rpc.request({
-      method: "thread/name/set",
-      params: { threadId, name },
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    await setThreadNameRpc(this.rpc, threadId, name, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean> {
@@ -960,30 +895,17 @@ export class CodexAppServerClient implements
   }
 
   async listModels(beforeSubmit?: () => void): Promise<ModelOption[]> {
-    return this.listModelCatalog(false, false, beforeSubmit);
-  }
-
-  async lunaReserveModel(): Promise<ModelOption | null> {
-    const models = await this.listModelCatalog(true, true);
-    return models.find((model) => model.model === lunaReserveModel) ?? null;
-  }
-
-  private async listModelCatalog(
-    includeHidden: boolean,
-    hiddenOnly = false,
-    beforeSubmit?: () => void,
-  ): Promise<ModelOption[]> {
     const models: ModelOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
       const result: ModelListResponse = await this.rpc.request<ModelListResponse>({
         method: "model/list",
-        params: { limit: 100, includeHidden, ...(cursor ? { cursor } : {}) },
+        params: { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
       }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       for (const model of result.data) {
-        const mapped = toModelOption(model, includeHidden);
-        if (mapped && (!hiddenOnly || model.hidden)) {
+        const mapped = toModelOption(model);
+        if (mapped) {
           models.push(mapped);
         }
       }
@@ -1436,7 +1358,6 @@ export class CodexAppServerClient implements
     options: { background?: boolean; signal?: AbortSignal; beforeSubmit?: () => void } = {},
   ): Promise<AccountRateLimits> {
     const params = {
-      supportsLunaReserve: true,
       ...(options.background ? { excludeResetCreditDetails: true } : {}),
     } satisfies GetAccountRateLimitsParams;
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
@@ -1449,7 +1370,7 @@ export class CodexAppServerClient implements
   async readResetCredits(signal?: AbortSignal, beforeSubmit?: () => void): Promise<OpenAiResetCreditSnapshot> {
     if (await this.openAiAccountRoute(signal, beforeSubmit) !== "chatgpt") throw new Error("ChatGPT account required");
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
-      method: "account/rateLimits/read", params: { supportsLunaReserve: true, excludeResetCreditDetails: false },
+      method: "account/rateLimits/read", params: { excludeResetCreditDetails: false },
     }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     const summary = response.rateLimitResetCredits;
     if (typeof response.accountId !== "string" || !response.accountId || !summary
@@ -1475,42 +1396,6 @@ export class CodexAppServerClient implements
     }, { retryOverload: false, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (!["reset", "nothingToReset", "noCredit", "alreadyRedeemed"].includes(response.outcome)) throw new Error("Invalid reset outcome");
     return response.outcome;
-  }
-
-  async updateLunaReserveThreadSettings(
-    threadId: string,
-    settings: LunaReserveThreadSettings,
-    beforeSubmit?: () => void,
-  ): Promise<void> {
-    await this.confirmThreadSettings(
-      threadId,
-      actual => actual.model === settings.model
-        && actual.effort === settings.effort
-        && actual.serviceTier === (settings.serviceTier ?? "default")
-        && actual.collaborationMode === settings.collaborationMode,
-      signal => {
-        beforeSubmit?.();
-        return this.rpc.request({
-          method: "thread/settings/update",
-          params: {
-            threadId,
-            model: settings.model,
-            effort: settings.effort,
-            serviceTier: settings.serviceTier,
-            collaborationMode: {
-              mode: settings.collaborationMode,
-              settings: {
-                model: settings.model,
-                reasoning_effort: settings.effort,
-                developer_instructions: null,
-              },
-            },
-          },
-        }, { retryOverload: false, signal });
-      },
-      () => new Error("Luna Reserve 设置结果尚未确认，请查询当前会话模型"),
-      () => new Error("Luna Reserve 设置更新失败"),
-    );
   }
 
   async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
@@ -1605,29 +1490,6 @@ export class CodexAppServerClient implements
       rememberCursor("permissionProfile/list", cursor, cursors);
     } while (cursor);
     return profiles;
-  }
-
-  async getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null> {
-    const response = await this.rpc.request<ThreadGoalGetResponse>({
-      method: "thread/goal/get",
-      params: { threadId },
-    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
-    return response.goal ? toThreadGoal(response.goal, threadId) : null;
-  }
-
-  async setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal> {
-    const response = await this.rpc.request<ThreadGoalSetResponse>({
-      method: "thread/goal/set",
-      params: { threadId, objective, status: "active", origin: "user" },
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
-    return toThreadGoal(response.goal, threadId);
-  }
-
-  async clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void> {
-    await this.rpc.request({
-      method: "thread/goal/clear",
-      params: { threadId, origin: "user" },
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 }
 

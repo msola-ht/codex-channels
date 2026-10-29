@@ -59,7 +59,6 @@ import {
   type ConversationInputEvent,
   type RateLimitSnapshot,
   type SurfaceId,
-  type ThreadGoal,
   type ThreadApprovalsReviewer,
   type ThreadTokenUsage,
   type TurnStartIdentity,
@@ -78,10 +77,7 @@ import type {
   ThreadApprovalsReviewerPort,
   TurnInput,
 } from "./turn-port.js";
-import type {
-  ThreadQueueItem,
-  ThreadQueuePort,
-} from "./thread-queue-port.js";
+import type { ThreadQueuePort } from "./thread-queue-port.js";
 import type {
   ThreadHistoryPort,
   ThreadRevertListResult,
@@ -92,18 +88,9 @@ import type {
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
 import { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
-import {
-  ThreadQueueService,
-  queueUserFacingError,
-  type ThreadQueueListResult,
-  type ThreadQueueReorderResult,
-} from "./thread-queue-service.js";
 import { ThreadRevertService } from "./thread-revert-service.js";
+import { hasNativeQueueItems } from "./thread-queue-reader.js";
 import type { SessionDisplayCachePort } from "../conversation-core/index.js";
-import {
-  LunaReserveService,
-  type LunaReserveServiceOptions,
-} from "./luna-reserve-service.js";
 import { ConversationAccountMetricsService } from "./conversation-account-metrics-service.js";
 import {
   ConversationExtensionQueryService,
@@ -120,14 +107,10 @@ import {
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
-import type { QueueSubmissionObservation, ThreadQueueExecutionContext } from "./thread-queue-observer.js";
+import type { ThreadTitleService } from "./thread-title-service.js";
+import type { TitleInputContext, SetGeneratedThreadNameRequest, SetGeneratedThreadNameResult, ThreadTitlePort } from "./thread-title-port.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
-export type {
-  ThreadQueueListResult,
-  ThreadQueueReorderResult,
-} from "./thread-queue-service.js";
-
 export interface Submission {
   threadId: string;
   turnId: string;
@@ -219,7 +202,6 @@ export interface ConversationStatus {
   fastModePending: boolean;
   collaborationMode: "default" | "plan";
   collaborationModePending: boolean;
-  goal?: ThreadGoal;
   contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
@@ -238,25 +220,22 @@ export interface PreparedAttachmentSubmission {
   readonly signal: AbortSignal;
   readonly mayHaveSubmitted: boolean;
   captureTarget(): void;
-  submit(value: string | ConversationInput): Promise<Submission>;
+  submit(value: string | ConversationInput, titleInput?: TitleInputContext): Promise<Submission>;
   dispose(): void;
 }
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image" | "file", observer?: SubmissionObserver): PreparedAttachmentSubmission;
-  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission>;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image" | "file", observer?: SubmissionObserver, titleInput?: TitleInputContext): PreparedAttachmentSubmission;
+  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver, titleInput?: TitleInputContext): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
   compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
   fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation, titleInput?: TitleInputContext): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }>;
-  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
-  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
 }
 
 /** Stable model and installed-extension boundary. */
@@ -268,6 +247,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { skillName: string }>;
   invokePlugin(
     target: ConversationTarget,
@@ -275,6 +255,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
@@ -283,6 +264,7 @@ export interface ConversationExtensionUseCases {
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { roleName: string }>;
   modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
@@ -310,24 +292,8 @@ export interface ConversationExtensionUseCases {
   listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]>;
 }
 
-/** Stable native Queue and paginated Revert boundary. */
-export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem>;
-  queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
-  queueUpdate(
-    target: ConversationTarget,
-    selector: string,
-    value: string,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueItem>;
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }>;
-  queueReorder(
-    target: ConversationTarget,
-    selector: string,
-    position: number,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueReorderResult>;
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }>;
+/** Stable paginated Revert boundary. */
+export interface ConversationRevertUseCases {
   revertList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
@@ -396,19 +362,17 @@ export interface ConversationAccountMetricsUseCases {
 export class ConversationService implements
   ConversationTurnUseCases,
   ConversationSessionUseCases,
-  ConversationQueueRevertUseCases,
+  ConversationRevertUseCases,
   ConversationExtensionUseCases,
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly attachmentInputs = new Map<string, Set<AbortController>>();
   private readonly pendingSelections = new Set<{ threadId: string | undefined; invalidated: boolean }>();
   private readonly hookUseCases: ConversationHookService;
-  private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
   private readonly extensionQueries: ConversationExtensionQueryService;
   private readonly accountMetrics: ConversationAccountMetricsService;
-  private readonly lunaReserve: LunaReserveService | undefined;
-  private readonly pendingBackgroundReleases = new Map<string, boolean>();
+  private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, {
     promise: Promise<boolean>;
     retryRequested: boolean;
@@ -417,6 +381,23 @@ export class ConversationService implements
   private idleReleaseEnabled = true;
   private idleReleaseGeneration = 0;
   private readonly sessionQueries: ConversationSessionQueryService;
+  private threadTitles: ThreadTitleService | undefined;
+
+  setThreadTitleService(service: ThreadTitleService): void { this.threadTitles = service; }
+
+  async writeGeneratedThreadName(target: ConversationTarget, request: SetGeneratedThreadNameRequest,
+    port: ThreadTitlePort): Promise<SetGeneratedThreadNameResult> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.locked(target, () => { request.beforeSubmit(); return port.setGeneratedThreadName(request); }),
+        new Promise<SetGeneratedThreadNameResult>(resolve => {
+          timer = setTimeout(() => resolve({ type: "unconfirmed" }), Math.max(0, request.deadlineMs - Date.now()));
+          timer.unref();
+        }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -436,10 +417,6 @@ export class ConversationService implements
     threadHistory?: ThreadHistoryPort,
     private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
     sessionDisplayCache?: SessionDisplayCachePort,
-    lunaReserveOptions?: Omit<
-      LunaReserveServiceOptions,
-      "router" | "models" | "collaborationModes" | "activity" | "locks"
-    >,
     private readonly threadApprovalsReviewer?: ThreadApprovalsReviewerPort,
     hookAuthorization?: (target: ConversationTarget, actorId: string) => void,
     hookReviewPolicy?: HookReviewPolicy,
@@ -470,55 +447,12 @@ export class ConversationService implements
       providerAccounts,
       requestMetricsQuery,
     );
-    this.queueUseCases = new ThreadQueueService(
-      this.locks,
-      router,
-      models,
-      collaborationModes,
-      threadQueue,
-    );
     this.revertUseCases = new ThreadRevertService(
       this.locks,
       router,
       threadQueue,
       threadHistory,
     );
-    this.lunaReserve = lunaReserveOptions
-      ? new LunaReserveService({
-          ...lunaReserveOptions,
-          router,
-          models,
-          ...(collaborationModes ? { collaborationModes } : {}),
-          activity: {
-            hasActiveTurn: (threadId) => core.activeTurnForThread(threadId) !== undefined,
-          },
-          locks: this.locks,
-        })
-      : undefined;
-  }
-
-  markLunaReserveUsageLimit(threadId: string, turnId: string): void {
-    this.lunaReserve?.markUsageLimit(threadId, turnId);
-  }
-
-  recoverLunaReserveAfterTurn(threadId: string, turnId: string): void {
-    this.lunaReserve?.recoverAfterTurn(threadId, turnId);
-  }
-
-  clearLunaReserveThread(threadId: string): void {
-    this.lunaReserve?.clearThread(threadId);
-  }
-
-  observeLunaReserveSettings(threadId: string): void {
-    this.lunaReserve?.observeSettings(threadId);
-  }
-
-  clearLunaReserveAccountState(): void {
-    this.lunaReserve?.clearAccountState();
-  }
-
-  closeLunaReserve(): Promise<void> {
-    return this.lunaReserve?.close() ?? Promise.resolve();
   }
 
   releaseThread(
@@ -629,7 +563,6 @@ export class ConversationService implements
         return busy();
       }
       this.invalidateRevertSnapshot(target);
-      this.invalidateQueueSnapshot(current.threadId);
       this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return { status: "released", threadId: current.threadId };
     });
@@ -643,10 +576,10 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query, assertAuthorized);
   }
 
-  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission> {
+  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver, titleInput?: TitleInputContext): Promise<Submission> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
     try {
-      return await this.submitObserved(target, value, isAllowed, observation);
+      return await this.submitObserved(target, value, isAllowed, observation, titleInput);
     } finally {
       observation?.settle();
     }
@@ -657,6 +590,7 @@ export class ConversationService implements
     value: string | ConversationInput,
     isAllowed?: () => boolean,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     let input: TurnInput[];
     try {
@@ -679,7 +613,7 @@ export class ConversationService implements
     assertAllowed();
     return this.locked(target, () => {
       assertAllowed();
-      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed, observation);
+      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed, observation, undefined, titleInput);
     });
   }
 
@@ -688,7 +622,7 @@ export class ConversationService implements
     this.extensionQueries.closeMcpLogins();
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" | "file" = "video", observer?: SubmissionObserver): PreparedAttachmentSubmission {
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" | "file" = "video", observer?: SubmissionObserver, titleInput?: TitleInputContext): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     const unavailable = (message: string) => new UserFacingError(kind === "image" ? "image.download-failed"
@@ -734,7 +668,7 @@ export class ConversationService implements
           threadId: this.router.current(target)?.threadId,
           selectionScope: fixesModelSelection ? this.models.status(target).selectionScope : undefined };
       },
-      submit: async (value) => {
+      submit: async (value, submittedTitleInput) => {
         // One prepared scope owns one observer lifecycle. A repeated call must
         // not settle the same external observer again and revoke prior output.
         if (used) throw unavailable("附件提交入口已使用");
@@ -779,7 +713,7 @@ export class ConversationService implements
                 if (fixesModelSelection) snapshot.selectionScope = this.models.status(target).selectionScope;
               }
               assertCurrent();
-            });
+            }, submittedTitleInput ?? titleInput);
           });
         } finally {
           observation?.settle();
@@ -794,6 +728,7 @@ export class ConversationService implements
     text: string,
     isCurrent: () => boolean,
     observer?: SubmissionObserver,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
     try {
@@ -808,7 +743,7 @@ export class ConversationService implements
         if (input.length === 0) {
           throw new UserFacingError("message.empty", "回答不能为空");
         }
-        return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent, observation);
+        return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent, observation, undefined, titleInput);
       });
     } finally {
       observation?.settle();
@@ -821,6 +756,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { skillName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -858,7 +794,7 @@ export class ConversationService implements
           path: skill.path,
         },
       ], { kind: "skill", name: skill.name },
-      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation);
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation, undefined, titleInput);
       return { ...submission, skillName: skill.name };
     });
   }
@@ -869,6 +805,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { pluginName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -916,7 +853,7 @@ export class ConversationService implements
       threadId => {
         this.commandThreadGuard(target, threadId, assertAuthorized)();
         requirePluginProvider();
-      }, assertAuthorized, observation);
+      }, assertAuthorized, observation, undefined, titleInput);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -953,6 +890,7 @@ export class ConversationService implements
     task: string,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission & { roleName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -975,7 +913,7 @@ export class ConversationService implements
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ], { kind: "agent", name: role.name }, assertAuthorized, observation);
+    ], { kind: "agent", name: role.name }, assertAuthorized, observation, titleInput);
     return { ...submission, roleName: role.name };
   }
 
@@ -985,13 +923,14 @@ export class ConversationService implements
     identity?: TurnStartIdentity,
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     this.touchActivity(target);
     return this.authorizedLocked(
       target,
       assertAuthorized,
       () => this.submitInputLocked(target, input, identity,
-        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation),
+        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation, undefined, titleInput),
     );
   }
 
@@ -1003,6 +942,7 @@ export class ConversationService implements
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
     onThreadPrepared?: (threadId: string) => void,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     assertAuthorized?.();
     this.touchActivity(target);
@@ -1022,7 +962,11 @@ export class ConversationService implements
       try {
         observation?.prepare({ threadId: active.threadId, kind: "steer", expectedTurnId: active.turnId, clientUserMessageId });
         const result = await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
-          beforeSubmit, observation ? () => observation.attempt() : undefined);
+          beforeSubmit, () => {
+            observation?.attempt();
+            this.threadTitles?.attempted(target, active.threadId, clientUserMessageId, input, titleInput);
+            return undefined;
+          });
         if (result.turnId !== active.turnId) throw new Error("追加输入响应与预期 Turn 不一致");
         observation?.confirm({ threadId: active.threadId, turnId: result.turnId, steered: true });
       } catch (error) {
@@ -1031,41 +975,7 @@ export class ConversationService implements
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation, onThreadPrepared);
-  }
-
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value, assertAuthorized, observation);
-  }
-
-  queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
-    return this.queueUseCases.list(target, page, assertAuthorized);
-  }
-
-  queueUpdate(
-    target: ConversationTarget,
-    selector: string,
-    value: string,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueItem> {
-    return this.queueUseCases.update(target, selector, value, assertAuthorized);
-  }
-
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }> {
-    return this.queueUseCases.delete(target, selector, assertAuthorized, onDeleted);
-  }
-
-  queueReorder(
-    target: ConversationTarget,
-    selector: string,
-    position: number,
-    assertAuthorized?: () => void,
-  ): Promise<ThreadQueueReorderResult> {
-    return this.queueUseCases.reorder(target, selector, position, assertAuthorized);
-  }
-
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }> {
-    return this.queueUseCases.start(target, selector, assertAuthorized, observation);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation, onThreadPrepared, titleInput);
   }
 
   revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
@@ -1088,10 +998,6 @@ export class ConversationService implements
     assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
     return this.revertUseCases.confirm(target, token, actorId, assertAuthorized);
-  }
-
-  invalidateQueueSnapshot(threadId: string): void {
-    this.queueUseCases.invalidateSnapshot(threadId);
   }
 
   invalidateRevertSnapshot(threadId: string): void;
@@ -1267,7 +1173,7 @@ export class ConversationService implements
         }, assertAuthorized);
       this.invalidateRevertSnapshot(target);
       if (preserveCurrent && current) {
-        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.pendingBackgroundReleases.add(current.threadId);
         this.bindingLifecycle?.backgrounded(current.threadId);
       }
       if (selectedHasQueue) {
@@ -1306,7 +1212,7 @@ export class ConversationService implements
         restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
       } : undefined, assertAuthorized);
       if (preserveCurrent && current) {
-        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.pendingBackgroundReleases.add(current.threadId);
         this.bindingLifecycle?.backgrounded(current.threadId);
       }
       this.invalidateRevertSnapshot(target);
@@ -1498,7 +1404,11 @@ export class ConversationService implements
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      await this.codex.setThreadName(binding.threadId, normalized, this.commandThreadGuard(target, binding.threadId, assertAuthorized, true));
+      const guard = this.commandThreadGuard(target, binding.threadId, assertAuthorized, true);
+      await this.codex.setThreadName(binding.threadId, normalized, () => {
+        guard();
+        this.threadTitles?.cancelThread(binding.threadId);
+      });
     });
   }
 
@@ -1541,7 +1451,7 @@ export class ConversationService implements
     return this.withGuardedSelection(target, (guard) => this.requireCollaborationModes().toggle(target, guard), assertAuthorized);
   }
 
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission> {
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation, titleInput?: TitleInputContext): Promise<Submission> {
     const normalized = prompt.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
@@ -1565,6 +1475,8 @@ export class ConversationService implements
         undefined,
         assertAuthorized,
         observation,
+        undefined,
+        titleInput,
       );
     });
   }
@@ -1728,42 +1640,6 @@ export class ConversationService implements
     return this.extensionQueries.listPermissionProfiles(target, assertAuthorized);
   }
 
-  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<{ threadId: string; goal: ThreadGoal | null }> {
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      const goal = await this.codex.getGoal(binding.threadId, beforeSubmit);
-      return { threadId: binding.threadId, goal };
-    });
-  }
-
-  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal> {
-    const normalized = objective.trim();
-    if (!normalized) {
-      return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
-    }
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      const goal = await this.codex.setGoal(binding.threadId, normalized, beforeSubmit);
-      this.core.handle({
-        type: "thread.goal.updated",
-        threadId: binding.threadId,
-        goal,
-      });
-      return goal;
-    });
-  }
-
-  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
-    return this.authorizedLocked(target, assertAuthorized, async () => {
-      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      await this.codex.clearGoal(binding.threadId, beforeSubmit);
-      this.core.handle({
-        type: "thread.goal.cleared",
-        threadId: binding.threadId,
-      });
-    });
-  }
-
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
@@ -1771,7 +1647,6 @@ export class ConversationService implements
     const executionContext = binding ? this.router.executionContextForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
-    const goal = binding ? this.core.goal(binding.threadId) : undefined;
     const contextCompactionCount = binding
       ? this.core.contextCompactionCount(binding.threadId)
       : undefined;
@@ -1791,7 +1666,6 @@ export class ConversationService implements
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
-      ...(goal ? { goal } : {}),
       ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
       ...(weeklyLimit ? { weeklyLimit } : {}),
       workspaceId: workspace.id,
@@ -1901,6 +1775,7 @@ export class ConversationService implements
     assertAuthorized?: () => void,
     observation?: SubmissionObservation,
     onThreadPrepared?: (threadId: string) => void,
+    titleInput?: TitleInputContext,
   ): Promise<Submission> {
     this.touchActivity(target);
     const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
@@ -1943,7 +1818,11 @@ export class ConversationService implements
           clientUserMessageId,
           workspace.cwd,
           { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); },
-            ...(observation ? { requestAttempted: () => observation.attempt() } : {}) },
+            requestAttempted: () => {
+              observation?.attempt();
+              this.threadTitles?.attempted(target, binding.threadId, clientUserMessageId, input, titleInput);
+              return undefined;
+            } },
         );
       } catch (error) {
         this.recordTurnError("start", target, binding.threadId, null, error);
@@ -2037,20 +1916,25 @@ export class ConversationService implements
   }
 
   private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
-    await this.queueUseCases.rejectPendingOverrideChange(target, assertAuthorized);
+    assertAuthorized?.();
+    const threadId = this.router.current(target)?.threadId;
+    if (threadId && await this.probeNativeQueueItems(threadId, assertAuthorized)) {
+      throw new UserFacingError(
+        "queue.pending-overrides",
+        "原生队列尚有待处理输入，请先在原生客户端处理完成后再修改模型、思考、速度或 Plan 选择",
+      );
+    }
   }
 
   private async probeNativeQueueItems(threadId: string, assertAuthorized?: () => void): Promise<boolean> {
-    return this.queueUseCases.hasItems(threadId, assertAuthorized);
+    return hasNativeQueueItems(this.threadQueue, threadId, assertAuthorized);
   }
 
   async releaseBackgroundIfComplete(
     threadId: string,
-    options: { dispatchQueued?: boolean; isCurrent?: () => boolean } = {},
+    options: { isCurrent?: () => boolean } = {},
   ): Promise<boolean> {
-    // Retries must keep the latest completion's dispatch policy: interruption
-    // preserves Queue entries even when subagent settlement delays release.
-    this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
+    this.pendingBackgroundReleases.add(threadId);
     const current = this.backgroundReleaseAttempts.get(threadId);
     if (current) {
       current.retryRequested = true;
@@ -2099,16 +1983,7 @@ export class ConversationService implements
     if (this.hasPendingSubagentRuns?.(threadId)) {
       return false;
     }
-    if (this.pendingBackgroundReleases.get(threadId) !== false) {
-      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId, () => {
-        if (!canRelease()) throw new UserFacingError("command.authorization-changed", "后台会话状态已变化");
-      });
-      if (queueState !== "empty" && queueState !== "unavailable") {
-        return false;
-      }
-    } else if (await this.probeNativeQueueItems(threadId)) {
-      return false;
-    }
+    if (await this.probeNativeQueueItems(threadId)) return false;
     const target = this.router.targetForThread(threadId);
     if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
     await this.bindingLifecycle?.beforeBackgroundRelease?.(target, threadId);
@@ -2154,35 +2029,10 @@ export class ConversationService implements
    * the App Server notification reader itself.
    */
   retryPendingBackgroundRelease(threadId: string, isCurrent?: () => boolean): Promise<boolean> {
-    const dispatchQueued = this.pendingBackgroundReleases.get(threadId);
-    if (dispatchQueued === undefined) {
+    if (!this.pendingBackgroundReleases.has(threadId)) {
       return Promise.resolve(false);
     }
-    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued, ...(isCurrent ? { isCurrent } : {}) });
-  }
-
-  private async dispatchNativeQueueBeforeRelease(
-    threadId: string,
-    assertAuthorized: () => void,
-  ): Promise<"empty" | "started" | "busy" | "unavailable"> {
-    const queue = this.threadQueue;
-    if (!queue) return "unavailable";
-    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(threadId, assertAuthorized);
-    try {
-      // `thread/queue/start` takes the same per-Thread dispatch lock as the
-      // 0.148 idle contributor. It is used here as a completion barrier: an
-      // already queued item is either started or observed empty only after
-      // the native dispatcher has finished its own start/delete sequence.
-      await queue.startQueueItem(threadId, undefined, beforeSubmit);
-      return "started";
-    } catch (error) {
-      const mapped = queueUserFacingError(error, "start");
-      if (mapped.code === "queue.empty") return "empty";
-      if (mapped.code === "queue.unavailable") return "unavailable";
-      if (mapped.code === "queue.busy") return "busy";
-      if (mapped.code === "queue.item-not-found") return "busy";
-      throw mapped;
-    }
+    return this.releaseBackgroundIfComplete(threadId, { ...(isCurrent ? { isCurrent } : {}) });
   }
 
   private restoreSelectionsAfterBindingChange(
@@ -2199,7 +2049,6 @@ export class ConversationService implements
 
   private clearConversationState(target: ConversationTarget): void {
     this.clearPendingSelections(target);
-    this.queueUseCases.clearSnapshot(target);
     this.invalidateRevertSnapshot(target);
   }
 

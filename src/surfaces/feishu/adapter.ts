@@ -4,7 +4,6 @@ import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-atta
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
-  type ConversationCommandResult,
   type ConversationTurnUseCases,
   type ConversationSessionUseCases,
   type ScheduledTaskConfirmation,
@@ -27,14 +26,10 @@ import { formatQuotedInput } from "../quoted-input.js";
 import type {
   FeishuCommandCenter,
   FeishuCommandCenterAction,
-  FeishuCommandCenterChoices,
   FeishuCommandCenterResponse,
   FeishuModelSelectionInteraction,
 } from "./command-center.js";
 import {
-  renderQueueCommandCenterChoices,
-  renderQueueItemChoices,
-  renderQueueDeleteConfirmationChoices,
   renderCommandCenterInitialChoices,
   renderScheduleCreateChoices,
   renderScheduleCreateForm,
@@ -158,7 +153,9 @@ export class FeishuConversationAdapter {
     const kind = message.kind === "text" ? undefined : message.kind;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(message.target, allowed, kind,
-      () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind));
+      () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind, undefined,
+        (message.kind === "image" || message.kind === "video") && message.text?.trim()
+          ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined));
     this.receivedAttachments.set(message, receipt);
     return Object.assign(
       () => { receipt.dispose(); this.receivedAttachments.delete(message); },
@@ -310,6 +307,8 @@ export class FeishuConversationAdapter {
           formatQuotedInput(message.text, quotedText),
           () => !this.videoCancellation.signal.aborted
             && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+          undefined,
+          { actorId: message.actorId, text: message.text, source: "task" },
         ),
       );
       this.settleTurnReplyTarget(
@@ -443,16 +442,6 @@ export class FeishuConversationAdapter {
           "doctor",
         );
         return;
-      }
-      if (action === "queue") {
-        const queueResponse = await this.handleQueueCommandCenterAction(
-          target,
-          actorId,
-          input,
-        );
-        if (queueResponse) {
-          return queueResponse;
-        }
       }
       if (action === "schedule") {
         const scheduleResponse = await this.handleScheduleCommandCenterAction(
@@ -618,108 +607,6 @@ export class FeishuConversationAdapter {
     return undefined;
   }
 
-  private async handleQueueCommandCenterAction(
-    target: ConversationTarget,
-    actorId: string,
-    input: string,
-  ): Promise<FeishuCommandCenterResponse | undefined> {
-    const normalized = input.trim();
-    if (normalized === "") {
-      return this.loadQueueCommandCenterChoices(target, actorId, 1, 0);
-    }
-    if (normalized === "add") {
-      return renderCommandCenterForm("queue");
-    }
-    const listMatch = /^list ([1-9]\d*)(?: chunk ([1-9]\d*))?$/u.exec(normalized);
-    if (listMatch) {
-      return this.loadQueueCommandCenterChoices(
-        target,
-        actorId,
-        Number(listMatch[1]),
-        Number(listMatch[2] ?? "1") - 1,
-      );
-    }
-    const itemMatch = /^item ([1-9]\d*) ([1-9]\d*) ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
-    if (itemMatch) {
-      return this.loadQueueItemCommandCenterChoices(
-        target,
-        actorId,
-        Number(itemMatch[1]),
-        Number(itemMatch[2]) - 1,
-        itemMatch[3]!,
-      );
-    }
-    const deleteMatch = /^delete-confirm ([1-9]\d*) ([1-9]\d*) ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
-    if (deleteMatch) {
-      const result = await this.loadQueueResult(
-        target,
-        actorId,
-        Number(deleteMatch[1]),
-      );
-      const item = result.result.items.find((candidate) => candidate.id === deleteMatch[3]);
-      if (!item) {
-        throw new UserFacingError(
-          "queue.item-not-found",
-          "Queue 条目按钮已失效，请刷新 Queue 列表",
-        );
-      }
-      return renderQueueDeleteConfirmationChoices(
-        Number(deleteMatch[1]),
-        Number(deleteMatch[2]) - 1,
-        item,
-      );
-    }
-    return undefined;
-  }
-
-  private async loadQueueResult(
-    target: ConversationTarget,
-    actorId: string,
-    page: number,
-  ): Promise<Extract<ConversationCommandResult, { kind: "thread-queue" }>> {
-    const result = await this.commands.execute(
-      target,
-      "queue",
-      `list ${page}`,
-      actorId,
-    );
-    if (result.kind !== "thread-queue") {
-      throw new UserFacingError(
-        "queue.item-not-found",
-        "Queue 列表按钮已失效，请刷新 Queue 列表",
-      );
-    }
-    return result;
-  }
-
-  private async loadQueueCommandCenterChoices(
-    target: ConversationTarget,
-    actorId: string,
-    page: number,
-    chunk: number,
-  ): Promise<FeishuCommandCenterChoices> {
-    const result = await this.loadQueueResult(target, actorId, page);
-    return renderQueueCommandCenterChoices(result, chunk);
-  }
-
-  private async loadQueueItemCommandCenterChoices(
-    target: ConversationTarget,
-    actorId: string,
-    page: number,
-    chunk: number,
-    itemId: string,
-  ): Promise<FeishuCommandCenterChoices> {
-    const result = await this.loadQueueResult(target, actorId, page);
-    const item = result.result.items.find((candidate) => candidate.id === itemId);
-    if (!item) {
-      throw new UserFacingError(
-        "queue.item-not-found",
-        "Queue 条目按钮已失效，请刷新 Queue 列表",
-      );
-    }
-    return renderQueueItemChoices(page, chunk, item);
-  }
-
   private async handleFeishuCommand(
     actorId: string,
     appId: string,
@@ -867,6 +754,8 @@ export class FeishuConversationAdapter {
       check();
       submissionScope = await this.receivedAttachments.get(message)?.prepare() ?? this.conversations.prepareAttachmentSubmission(message.target, () =>
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+        "video", undefined,
+        message.text?.trim() ? { actorId: message.actorId, text: message.text, source: "caption" } : undefined,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
       check();
@@ -996,7 +885,7 @@ export class FeishuConversationAdapter {
     if (!scope) throw new UserFacingError("image.download-failed", "图片提交能力尚未就绪");
     const downloadCancellation = new AbortController();
     const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal, downloadCancellation.signal]);
-    const inputs = new SurfaceInputBatcher((_target, input) => scope.submit(input), this.inputOptions);
+    const inputs = new SurfaceInputBatcher((_target, input, _actorId, titleInput) => scope.submit(input, titleInput), this.inputOptions);
     try {
       scope.captureTarget();
       const imageDownloads = messages.map(message => message.imageKeys.map(imageKey =>
@@ -1023,6 +912,7 @@ export class FeishuConversationAdapter {
           sequence,
           aggregationKey: `feishu:${replyMessage.messageId}`,
           aggregationSize: messages.length,
+          ...(currentText ? { titleInput: { text: currentText, source: "caption" as const } } : {}),
           ...(currentText
             ? { text: formatQuotedInput(currentText, quotedText) }
             : quotedText === undefined

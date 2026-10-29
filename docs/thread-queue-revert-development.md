@@ -1,141 +1,42 @@
-# Thread Queue 与 Revert
+# 原生 Queue 只读保护与 Revert
 
-本文定义锁定 Codex CLI `0.164.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
-`thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
-当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
-三个 Surface 的当前支持范围和静态检查入口以
-[`Codex 协议支持矩阵`](index.md) 为准。功能变化须对照锁定的官方源码复核协议语义；
-队列容量、分页、自动派发及重启恢复等运行行为按需人工验收，不以静态检查通过代替。
+本文定义锁定 Codex CLI `0.164.0` 的原生队列只读检查、分页历史和 Revert 合同。
+Gateway 已移除会话 Queue 用户功能、Goal 及 Luna Reserve 自动回退；不删除 App Server 中已有的队列、
+目标和会话历史，也不修改原生客户端配置。不添加、更新、删除、排序或启动队列项。
 
-## 当前实现约束
+## 原生队列只读保护
 
-App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gateway 不保存平行消息队列。
-新 Thread 使用分页历史；Revert 通过显式确认和执行前复核协调历史、活动 Turn 与原生 Queue。
+保留 `thread/queue/list` 和 `thread/queue/changed`，仅用于以下边界：
 
-- Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
-  只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
-  必须明确拒绝，不做迁移、隐式 Fork 或内部文件改写。
-- `/revert list [页码]` 固定按最新到最旧排序、每页 25 条，首期最多浏览最近 20 页（500 个 Turn）。
-  查询只遍历到请求页，逐页校验游标非空、不重复且最终可达；页码超界、游标循环或中途历史变化
-  都失败关闭，不扩展成完整历史浏览器。
-- `/revert <Turn ID 或当前列表序号>` 中两种选择器都只能指向当前 Conversation 最近一次、五分钟内
-  的 `/revert list` 页面快照。完整 ID 不触发无界历史扫描；没有有效快照时统一要求重新列出。
-  页面按最新到最旧排列，因此目标位于第 `p` 页第 `i` 项时，本次将删除的 Turn 数可确定为
-  `(p - 1) * 25 + i`；执行前历史变化会使该数值和确认令牌一起失效。
-- Turn 列表请求显式使用 `sortDirection: "desc"`、`itemsView: "summary"`。Client 只从
-  `userMessage` Item 提取输入种类和有界文字预览，不把命令、工具参数、输出、本地路径或完整
-  Item 带出协议边界。Queue 与历史适配器复用同一个 Client 内部 `UserInput` 安全摘要工具，
-  不复制第二套裁剪规则。
-- Application 分别持有有界的页面选择快照和一次性确认注册表；二者都不持久化正文。
-  `thread/queue/changed`、`thread/reverted`、Thread 解绑/切换以及成功或失败的确认消费都会使相关
-  快照失效。Surface 只解析规范命令和渲染结构化结果，不保存历史镜像。
-  失效同时作用于正在等待的列表、预览与确认，最终 RPC 守卫也检查它；已提交请求按实际响应结算。
-  Queue 内部写前读取不更新数字选择快照，只有成功返回给列表调用方的页面建立新序号。
-- Queue 复核使用 Client 从完整有序 Queue 原始输入计算的不可逆摘要；摘要覆盖条目 ID、
-  `clientUserMessageId`、输入类型与完整输入值，但 Application 只接收摘要和条目数量。
-  不得用有界展示预览计算摘要，否则预览截断可能隐藏并发变化。
-- 升级前的历史合同实测使用临时 `CODEX_HOME`、当时锁定版 App Server 和本机 Mock Responses SSE 服务，
-  不调用用户账户或真实模型。历史实测确认 Queue 条目在 Revert 后按原顺序保留，但不会由 Revert
-  自动启动；用户显式 `/queue start` 后按队列顺序继续派发。
-  此前升级到 0.162.1 时，仅核对相关上游源码与 0.162.0 无差异，没有重跑 Queue/Revert 联合实测。
-  升级到 0.163.0 时，Queue 处理器与 Queue/Revert 上游合同测试保持不变；该版本升级期间仍未重跑联合实测。
-- 0.164.0 补验使用独立 Codex Home、真实 App Server 与回环模拟 Responses SSE：活动 Turn 下编辑/排序 Queue，
-  重复 ID 排列及 busy 启动均拒绝；中断和 Revert 保留队列，Revert 不自动派发，Resume 后队列完成并排空，
-  当前 medium/Standard 设置在回退恢复后保留。
-  具体输入、观察与清理见[升级补验记录](codex-cli-upgrade-decisions.md#2026-10-23-queuerevert-与原生-tui-补验)。
-- 随后经实际共享命令与 Application 入口补验预览、一次性确认、错误 Actor/Conversation、撤权、活动 Turn 变化及 Queue 并发变化，
-  均按合同拒绝过期或越界确认；有效确认中断活动 Turn、保留 Queue，显式启动后完成并清空。
-  授权端口采用隔离注入，尚不代表真实渠道身份、按钮及投递验收；详见
-  [确认与断线补验](codex-cli-upgrade-decisions.md#2026-10-23-确认断线与失败路径补验)。
+- Revert 预览显示条数；确认前比较完整有序输入指纹，变化使待用确认失效。
+- 模型、思考等级、速度和 Plan 的待生效选择不能与原生队列冲突。
+- 转移、切换和释放绑定前核对原生队列，防止内容在错误 Actor 下执行或丢失后台绑定。
+- 恢复非空队列的 Thread 时沿用原 Thread 设置，清除冲突的待生效选择。
+- 后台释放前只读检查；有条目时保留绑定，不再主动调用 `thread/queue/start`。
+
+Client 只返回 `itemCount`、`nextCursor` 和不可逆 `fingerprint`，指纹覆盖完整有序条目的 ID、
+`clientUserMessageId` 和原始输入，不以截断的文字预览代替。Application 不接收队列正文、
+媒体路径或 Skill 路径，不保留用户 Queue 列表选择快照。
+内部完整检查最多读取原生容量 100 条，仍验证游标和完整性。未知、失败或不完整状态不能当作空队列。
+Revert 无法读取完整队列时拒绝确认；绑定与模型安全检查保留各自既有的不可用与失败语义。
+读取保留 Actor、Workspace、Thread 绑定及异步等待后的实时授权守卫。
+变化通知只用于 Revert 快照及确认失效，不在 Reader 回调内等待 RPC 或平台网络。
+
+- `application/thread-queue-port.ts`：最小只读端口、页状态和已知不可用错误。
+- `application/thread-queue-reader.ts`：有界读取、完整性和错误映射。
+- `codex-client/queue-adapter.ts`：官方响应到条数、游标与指纹的投影。
+- `application/conversation-service.ts`：绑定、模型选择和后台释放保护。
+- `application/thread-revert-service.ts`：历史选择、一次性确认与指纹复核。
 
 ## 固定事实来源
 
-当前实现只以正式 Tag `rust-v0.164.0` 为准：
+以正式 Tag `rust-v0.164.0`（`6aaac694803004a63c6f393d153c96d22521a6b9`）为准，
+本机副本见[上游来源](upstream-sources.md)，不得用远端 main 替换。
 
-- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
-- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
-- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
-- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
-- 本地生成类型：[`codex-protocol/generated/v2/`](../src/codex-protocol/generated/v2/)。生成类型是字段名称和可空性的最终事实来源。
-
-参考源码应匹配提交
-`6aaac694803004a63c6f393d153c96d22521a6b9`，即 `rust-v0.164.0`；本机副本状态见[上游来源](upstream-sources.md)。不得用官方 `main`
-补充或替代本设计。
-
-## Queue 原生合同
-
-### 对齐范围
-
-| 原生合同 | Gateway 决策 |
-| --- | --- |
-| `thread/queue/add`、`list`、`update`、`delete`、`reorder`、`start` 六个请求 | 六个请求全部通过受控 Client 端口接入，不保留第二套本地排队方法 |
-| 每个 Thread 最多 100 条 | 采用原生 100 条，不再保留 Gateway 的 10 条限制 |
-| 列表默认每页 25 条、单页最多 100 条 | Application 和 Surface 默认展示 25 条；内部需要完整快照时最多一次读取 100 条，并仍检查游标 |
-| `QueuedSubmission` 包含 `id`、`input`、`clientUserMessageId` | 保留两个身份字段；`clientUserMessageId` 使用现有 Gateway UUID 前缀生成，不从消息正文推导 |
-| Queue 持久化在 App Server 的 SQLite 状态库 | 不写入 Gateway StateStore；公开文案明确说明重启后仍保留 |
-| 空闲 Thread 入队后可以立即自动派发 | 不再要求 `/queue add` 只能用于活动 Turn；后台完成释放时只调用一次原生 `thread/queue/start` 作为 0.148 派发屏障，不重放消息正文 |
-| 活动 Turn 完成后自动派发，普通新 Turn 不会提前消费 Queue | 只消费正常 `turn/started`、`turn/completed` 生命周期；`thread/queue/start` 与上游空闲派发共用 Thread 锁，启动成功则保留后台绑定，空队列才继续读取权威 Thread 状态 |
-| 中断当前 Turn 保留 Queue | `/stop` 不清空 Queue |
-| 冷 Thread 恢复后继续派发持久队列 | `thread/resume` 后不执行本地恢复或重放；由 App Server 决定派发 |
-| `start` 无 ID 时启动队首，有 ID 时可以启动非队首项 | 两种形式都开放；只在 Thread 已加载且空闲时调用 |
-| 活动或存在待触发 Turn 时 `start` 返回 busy，并保留 Queue | 映射为稳定的可操作错误，不自动重试、不删除条目 |
-| `reorder` 必须包含当前 Queue 的全部 ID 且每个恰好一次 | Application 从最新完整快照计算全排列；并发变化导致失败时提示刷新，不重试旧排列 |
-| `thread/queue/changed` 只携带 `threadId` | 不把通知解释为队列内容；只使当前 Conversation 的短期选择快照和 Revert 确认失效，列表和写操作始终重新读取权威状态。其他客户端实际派发出的 `turn/started` 只清理该 Thread 绑定 Conversation 的待生效模型、effort、Fast、Plan 选择，不影响其他 Conversation |
-
-Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread Store 为 local，但没有状态库、
-使用 in-memory Thread Store 或上游明确返回 `user message queue is unavailable` 时，Gateway 必须
-显示“当前 App Server 不提供持久队列”，不得退回旧内存实现。
-
-### Gateway 必须保留的边界
-
-以下差异不是重新实现 Queue，而是外部渠道的授权和展示边界：
-
-- 所有读写先校验当前 Surface Actor、Workspace、Conversation 与 Thread 绑定；外部用户不能提供任意 Thread ID。
-- Queue 归属 Thread，不归属某次 Gateway 进程。接管或转移前异步读取来源与目标 Thread 的权威 Queue；任一非空时阻止 Thread 被另一个外部 Conversation 接管，避免排队内容在新 Actor 下执行。
-- Queue 非空时继续禁止把当前 Thread 转为后台绑定；先由用户启动、删除或等待队列排空。
-- `/resume` 恢复已有非空 Queue 的 Thread 时沿用该 Thread 自身模型/协作设置，不把当前会话的待生效偏好
-  延后带入 Queue Turn，并在结果中明确提示；后台完成释放前重新查询 Queue 和按 Thread 的活动 Turn。
-- 第一阶段渠道命令只创建和更新纯文本条目。其他客户端创建的图片、音频、Skill 或 Mention 条目可以列出安全摘要、删除、排序或启动，但 Gateway 不允许编辑，以免丢失附件或扩大输入语义。
-- 列表不得显示本地媒体绝对路径、Plugin 路径或未裁剪的上游输入；Client 只返回输入种类、可编辑状态和有界文字预览。
-- `add`、`update`、`delete`、`reorder`、`start` 都是写操作，不在过载、超时或断线后盲目重试。`list` 是只读请求，可以使用现有有界过载重试。
-- Ephemeral、Archived、不接受直接输入的多代理 v2 子 Thread，以及未加载的 spawned subagent，沿用 App Server 的明确拒绝，不增加兼容回退。
-
-### 公开命令合同
-
-实施时把现有 `/queue <描述>` 收敛为与原生方法一一对应的规范语法：
-
-```text
-/queue add <文本>
-/queue list [页码]
-/queue update <ID 或当前列表序号> <文本>
-/queue delete <ID 或当前列表序号>
-/queue reorder <ID 或当前列表序号> <目标位置>
-/queue start [ID 或当前列表序号]
-```
-
-不同时保留 `/queue <描述>` 作为隐式别名。实现 PR 必须同步根 README、`/help`、三渠道菜单、
-错误文案。`list` 只在 Conversation 内存中保留有界、五分钟有效的“序号到条目 ID”
-选择快照，不保存消息正文；`thread/queue/changed` 使快照失效。数字选择器没有有效快照时要求先
-重新执行 `list`，完整 ID 则始终针对最新权威列表复核。跨客户端修改使条目或 reorder 全排列
-失效时返回刷新提示，不猜测用户原意。
-
-`add` 成功只表示 App Server 已接受条目。空闲 Thread 可能在响应后立即消费该条目，因此结果文案
-不得承诺它仍处于某个位置；活动 Thread 下可以在重新读取后显示当前序号。列表默认每页 25 条，
-最大四页，与原生 100 条容量一致。
-
-### 模块落点
-
-- `application/thread-queue-port.ts`：拥有稳定的 Queue 窄端口、列表页和安全条目摘要。
-- `codex-client/queue-adapter.ts`：在官方 `UserInput` 与安全摘要之间转换；不把生成类型或本地路径带出 Client。
-- `codex-client/client.ts`：封装六个 RPC，只有 `list` 允许只读重试。
-- `codex-client/provider-routing-client.ts`：六个请求全部通过 `callForThread` 路由到 Thread 所属 Provider App Server。
-- `application/conversation-service.ts`：完成授权后编排命令，维护不含正文的短期选择快照，解析选择器和计算最新完整 reorder 排列。
-- `bootstrap/gateway-component-graph.ts`：删除 `conversation-follow-up` 中由 Gateway 重放下一 Turn 的分支；后台 Thread 正常完成后的释放职责保留，并以一次原生 `thread/queue/start` 与权威 Thread 读取协调完成→自动派发竞争。Reader 回调只做本地失效并登记需要 RPC 的释放重试；组合根有界持有该任务，关闭时先停止接收新任务并限时等待，不在 Reader 回调内等待网络请求。
-- `codex-client/notification-thread-state.ts` 与组合根：校验 `thread/queue/changed.threadId`，只触发选择快照和 Revert 确认失效，不同步读取 Queue，也不阻塞 App Server Reader。
-- `surfaces/conversation-session-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
-
-Queue 容量、持久化、自动派发和失败结果以 App Server 为准，
-不增加 Gateway 内存队列、完成回调重放或失败清空逻辑。
+- [队列处理器](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：列表、分页和错误边界。
+- [队列合同](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：持久化和原生派发。
+- [回退合同](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史、中断、通知及重启。
+- [生成类型](../src/codex-protocol/generated/v2/)：字段名称与可空性的最终来源。
 
 ## Revert 原生合同
 
@@ -197,7 +98,7 @@ Turn ID 与数字序号都必须来自最近一次 `/revert list` 的同一页�
 - 被删除的边界 Turn，以及该 Turn 也会删除。
 - 当前能够确定的受影响 Turn 数；未遍历完整历史时不能显示猜测总数。
 - 是否会中断活动 Turn。
-- 当前 Queue 条数，并说明 0.148 原生 Revert 不负责清空 Queue。
+- 当前 Queue 条数，并说明原生 Revert 不负责清空 Queue。
 - “不会恢复工作区文件或外部副作用”。
 
 确认执行前重新分页读取权威历史和 Queue；目标不存在、最新 Turn、活动 Turn 或 Queue 摘要变化时，
@@ -218,14 +119,14 @@ Revert 成功后：
 - 校验并消费 `thread/reverted`，只使用 `threadId` 触发状态校正，不伪造被保留的历史。
 - 锁定 App Server 在内部恢复 Thread 设置并保留 ID 与订阅；Client 投影返回的 Thread 元数据，
   当前 Application 不据此改写 Router，也没有额外 `thread/read`，后续仍由权威通知和既有读取收敛。
-- 清除只属于被删除 Turn 的 Core 界面缓存，包括最近 Diff、Plan、Goal 展示和操作摘要；权威 Goal 是否保留以回退后的 App Server 读取结果为准。
+- 清除只属于被删除 Turn 的 Core 界面缓存，包括最近 Diff、Plan 展示和操作摘要。
 - 不自动启动新的 Turn，不重放被中断输入，不重试 Revert。
 - 其他客户端并发执行 Revert 时，以通知和下一次权威读取收敛；本地过期确认全部失效。
 
 ### 模块落点
 
 - `application/thread-history-port.ts`：拥有分页 Turn 摘要、历史模式和 Revert 稳定结果。
-- `codex-client/user-input-summary.ts`：从现有 Queue 适配器提取 Client 内部共享的 `UserInput`
+- `codex-client/user-input-summary.ts`：提供 Client 内部的 `UserInput`
   种类识别、有界文字预览和敏感路径裁剪；不从 `codex-client/index.ts` 公开。
 - `codex-client/history-adapter.ts`：复用共享输入摘要，从官方 Turn/Item 只提取选择所需的有界摘要，
   不传播完整历史或敏感操作参数。
@@ -235,65 +136,19 @@ Revert 成功后：
   `conversation-service.ts`：解析规范命令，维护最多 500 个 Turn 的有界页面选择状态，生成和校验
   一次性确认，并在执行前复核 Thread、历史和 Queue。
 - `codex-client/notification-conversation-events.ts` 与 `conversation-core`：增加受控的 `thread.reverted` 状态失效事件，不把原始响应带入 Core。
-- `surfaces/conversation-session-command-format.ts` 与三个 Surface：渲染统一列表、破坏性预览、确认结果和
+- `surfaces/conversation-session-command-format.ts` 与渠道：渲染统一列表、破坏性预览、确认结果和
   legacy/并发失败文案；同步 `/help` 与菜单，但不各自实现 Revert 状态。
 
 首期不接入 `thread/items/list` 公开浏览能力。只有真实合同或状态校正证明必须读取 Item 游标时，
 才把它作为 Revert 内部只读依赖受控导出；不能借 Revert 扩展成完整聊天历史浏览器。
 
-## 协议与配置边界
+## 协议与数据边界
 
-当前 JSON-RPC 初始化已经发送 `experimentalApi: true`，Queue/Revert 不需要新增 Transport 握手。
-采用时仍必须：
+只受控导出实际使用的 Queue 列表、变化通知、Turn 分页与 Revert 类型。
+不接入 `thread/items/list` 公开浏览，不新增 Gateway Schema 或消息正文持久化。
+现有实验握手和精确版本门禁保持不变。
 
-- 从 `codex-protocol/index.ts` 只导出实际使用的 Queue、Turn 分页、Revert 请求响应和通知类型。
-- 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
-  `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
-- 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
-- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.164.0` 时仍由现有版本门禁拒绝。
-- 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
-
-Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设功能开关。Revert 是新的破坏性实验
-命令，但已经由分页历史模式、能力判断和一次性确认失败关闭；首期同样不增加全局配置开关，避免
-出现协议已采用但三渠道行为因本机配置分裂的状态。若实施审查认为仍需灰度，应先修改本决策，
-而不是在代码中静默加入开关。
-
-## 验证链路
-
-相关实现变更遵循[统一验证规则](development-rules.md#verification)，并核对锁定版本的 Queue/Revert 行为。
-
-
-## 完成标准与停止条件
-
-### Queue 阶段完成标准
-
-Queue 已接入；以下为持续维护的实现与验收要求，不以 Revert 联合验收是否补齐作为接入状态判断：
-
-- 旧 Gateway Queue 已完全删除，生产代码不存在第二套消息正文队列。
-- 原生六个 Queue 请求、100 条容量和 25/100 分页与锁定协议一致。
-- Gateway/App Server 重启、冷恢复、多 Provider 和跨客户端修改不会丢失或串用 Queue。
-- `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
-
-### Revert 阶段完成标准
-
-Revert 已接入，以下为持续维护的实现要求；运行时历史模式、能力、授权、确认或状态复核不满足时拒绝操作：
-
-- 新建 Thread 使用 paginated；legacy Thread 明确拒绝 Revert，且没有隐式迁移。
-- Revert 具有一次性确认、执行前复核、活动 Turn 中断处理和“不会恢复文件”提示。
-- `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
-
-**验收范围。** 0.164.0 已补齐真实隔离 App Server 的 Queue/Revert 联合行为及共享命令入口确认守卫观察，
-详见本文“当前实现约束”链接的实际记录；模型响应来自回环模拟端点。后续
-[扩展验收](codex-cli-upgrade-decisions.md#2026-10-23-可行项扩展验收)补齐实际 Bootstrap 自动重连协调器恢复已有历史的空闲 Thread，
-不等于自动重连与 Queue/Revert 的完整联合观察。真实渠道身份、按钮、网络投递与多 Provider Queue/Revert 并用
-仍未因此验收，不能把内部入口结果外推到这些边界。
-这些未观察项不表示 Revert 尚未实现，也不单独构成关闭已接入功能的运行时条件；
-后续具备环境时补证，发现实际合同或状态问题则按下述停止条件处理。
-
-遇到以下任一情况必须停止实施并重新审查设计：
-
-- 真实 App Server 没有本地 Queue Store，或部署配置无法稳定提供 SQLite 状态库。
-- 第三方 Provider App Server 对 Queue/Revert 的合同与 OpenAI 主实例不同。
-- paginated 历史破坏现有 Resume、Fork、后台 Thread、Goal、审批或 Remote TUI 共享行为。
-- Revert 与 Queue 联合行为出现未记录的自动派发、条目丢失或顺序变化。
-- 为实现功能需要读取 Codex 内部会话文件、把正文写入 Gateway StateStore，或绕过现有 Actor/Workspace 授权。
+历史联合观察见[升级补验](codex-cli-upgrade-decisions.md#2026-10-23-queuerevert-与原生-tui-补验)
+和[确认与断线补验](codex-cli-upgrade-decisions.md#2026-10-23-确认断线与失败路径补验)。
+这些属于删除前实现的观察，不表示当前仍开放 Queue 命令。本次清理尚未部署；
+真实渠道交互、原生客户端并发和生产恢复仍未观察。

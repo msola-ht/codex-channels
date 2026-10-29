@@ -25,8 +25,7 @@
 
 依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖任何平台 SDK、SQLite 或服务管理器。Thread 生命周期端口和稳定快照由
 `session-routing` 拥有，`codex-client` 负责把固定版本官方响应映射到该边界；Routing 不反向依赖
-Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application` 拥有；Goal 的稳定状态类型
-由 `conversation-core` 统一定义，供请求结果和通知归约共同使用，Client 只在适配边界构造官方输入
+Client 或生成协议。Turn 和 Review 的执行端口由 `application` 拥有，Client 只在适配边界构造官方输入
 和解释响应。模型信息、思考等级和服务层级的稳定类型同样由
 `application` 拥有，Client 负责裁剪官方模型目录并封装 Standard/Fast/Ultrafast 默认值配置。Provider 账户能力
 由 Application 的编译期注册窄端口承接：OpenAI 通过 Client 选择官方多桶或兼容单桶响应，
@@ -41,7 +40,7 @@ Plugin 通过目标 Provider 实例的 `plugin/installed` 提供当前 Workspace
 OpenAI 主 App Server 或独立 Provider App Server；Session Routing、Application、Core、Approval、
 Storage 和 Surface 不复制实现。固定模式仍只有一个由基础配置决定 Provider 的主实例。
 
-Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、额度、MCP 和 warning 等通知转换为
+Client 把 Thread 路由通知与 Turn、Item、Token、账户、额度、MCP 和 warning 等通知转换为
 稳定事件；`conversation-core` 不解析原始协议。Client 同样解码和编码五类 Server Request，
 `approval` 只拥有稳定请求、授权语义和用户决定。生产源码只有 Client 导入生成协议，
 Bootstrap 通过 Client 读取版本并向 Surface 注入纯字符串；受控协议导出和模块依赖静态检查会阻止

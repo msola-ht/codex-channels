@@ -23,7 +23,6 @@ import {
 import {
   formatConversationOccupancy,
   formatConversationSessions,
-  formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
   isTurnLifecycleAcknowledgedOutcome,
@@ -37,7 +36,6 @@ import {
   formatConversationArtifacts,
   formatConversationAutoReview,
   formatConversationCollaborationMode,
-  formatConversationGoal,
   formatConversationPermissions,
   formatConversationStatus,
   formatConversationWorkspaces,
@@ -58,8 +56,6 @@ export function renderConversationCommandResult(
       return formatConversationCommandOutcome(result.outcome, formatLiteral);
     case "sessions":
       return formatConversationSessions(result, formatLiteral, formatCommand);
-    case "thread-queue":
-      return formatConversationThreadQueue(result);
     case "thread-revert":
       return formatConversationThreadRevert(result);
     case "thread-revert-preview":
@@ -116,8 +112,6 @@ export function renderConversationCommandResult(
       return formatConversationPermissions(result);
     case "artifacts":
       return formatConversationArtifacts(result);
-    case "goal":
-      return formatConversationGoal(result);
     case "occupancy":
       return formatConversationOccupancy(result, formatCommand);
   }

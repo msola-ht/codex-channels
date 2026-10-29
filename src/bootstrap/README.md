@@ -16,6 +16,13 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
 
 本目录是模块化单体的组合根，负责创建具体依赖并管理 Gateway 进程生命周期。
 
+自动命名由 `gateway-component-graph.ts` 注入持续 Actor、Workspace、连续绑定及实际 Provider 授权。
+当前连接完成用户 Item 在展示队列之前关联；名称变化同步取消旧任务，同值自有回写继续结算。
+Provider 设置应用在等待 activity 屏障之前取消命名；断线、解绑、撤权与热重载不恢复旧登记。
+停止同步关闭准入，所有标题任务与 Client 清理共用五秒等待，之后才关闭连接；不停止共享 Server。
+清理未确认记录固定原因和精确资源句柄；当前接线无法同步证明 Server 实例身份，诊断明确标为
+`serverInstance: "unknown"`，不得据 Provider 名称推断实例已退出或自动解除隔离。
+
 `surface-composition.ts` 将固定启动配置的显示解析器注入渠道。QQ 经渠道公开的地址解析器取得原始单聊接收者，不提供群地址映射。飞书使用已校验私聊的物理 Chat ID；Telegram 仅对当前进程已确认 `chat.type=private` 的地址应用覆盖，未知旧目标保守隐藏可选实时过程并记录原因，已保留终态仍独立履行投递，不猜测 ID 或删除绑定。显示覆盖修改需重启 Gateway 激活。
 共享 `/status` 的显示模式查询也使用 QQ 原始 OpenID 匹配单聊覆盖，不能把业务会话的 `c2c:` 前缀当作配置中的聊天 ID；不支持的 QQ 目标明确拒绝。
 
@@ -41,7 +48,7 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
   可选 authorizeAtDispatch 接收 Coordinator 的取消信号，允许来源结算等待；通过后仍用同步 authorized 在富化、排队、started 检查点及最终发送前复核。载荷解码失败仍按存储故障处理，来源拒绝或超时不冒充存储故障。
   组件图为 QQ 捕获 owner v3（共享身份字符串与一次来源引用），非 QQ 保持 v2；任务来源核对 Thread/Turn，MCP OAuth 完成通知的显式 notification 来源核对 Thread/Server，不伪造 Turn。QQ 旧 owner、无来源、跨代次或身份不匹配均禁发，发送前同步复核精确来源。通知来源仅驻当前代次内存，不从 Journal 恢复授权。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，等待前后及接受答复前复核交互归属，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
-- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前检查组合根的投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。所有端口参数包含本地提交守卫原样转发，使准入等待后仍能拒绝过期命令。
+- `output-execution-admission.ts`：在既有 Turn 执行端口前检查组合根的投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止与查询能力，不修改协议字段。所有端口参数包含本地提交守卫原样转发，使准入等待后仍能拒绝过期命令。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，拒绝断线前连接代次迟到的问题通知，仍消费取消事件，避免入站或输出积压导致旧问题重新登记；等待前捕获唯一授权 Actor 与工作区 ID/目录，交互限定原用户，分批回答及最终 Turn 发送均复核原授权和 Thread。拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
   QQ 回答按原交互 requestId 单次领取最终回应来信的提交票据，将原问题守卫与票据守卫合并，并透传既有 SubmissionObserver；新 Turn 结果由本次参与建立来源。失败取消票据，原授权仍有效时由 QQ 窄回调提示未确认，不借无 Turn 的 warning 扩大发送范围。
@@ -73,7 +80,7 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
   私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
-  原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
+  原生 Thread Queue 只读检查与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
   仅用于失效短期选择快照和校正 Core 派生状态；当前 Thread 审批设置窄端口先等待 Client 的 RPC 与合法通知确认，
   再以现有入站总线的有界排空等待共享归约完成，供 Application 复核绑定和最新实际审批方式；
   排空失败单独回报结果尚未确认，不乐观修改 Router 缓存。
@@ -91,8 +98,6 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
   同时拥有请求指标与账户快照的独立私有通知端点，指标批次或账户快照成功保存后发送对应失效通知，关闭时先停止指标写入再释放订阅端点；通知不调用 App Server。
   计划任务的内部组件、恢复顺序和
   Store 生命周期委托给 `scheduled-task-composition.ts`。
-  同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；
-  切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
 - `gateway-reconnect-coordinator.ts`：拥有断线检查去重、串行 Provider 重连、12 次有界退避和关闭取消；通过断线代次拒绝过期恢复确认，重复断线不会重置未完成恢复的重试预算。连接成功后的绑定恢复失败只重试恢复阶段，不重复握手。主动停止的 Provider 不自动重启。关闭时等待断线检查与重连任务，等待时限仍由顶层生命周期控制；绑定状态由 Binding Restore Coordinator 管理。
 - `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。把 Core 临时活动观察工厂交给 Router，在每次实际恢复请求前建立窗口，合并实时 Turn 开始与完成，旧快照不重新激活已结束 Turn；观察器在成功、失败或取消后释放，不跨生命周期锁等待复用。成功恢复后通过回调触发耗时补齐，停止后的迟到恢复不触发回调。
   普通后台绑定在 Router 恢复锁释放后交给 Application 的统一释放入口，核对父 Turn、权威后代、Queue 与交互保护；仅确认释放后提示离线结束，暂时失败保留绑定并进入原恢复重试。正常后台清理的补偿失败也交回绑定恢复，避免失去订阅后依赖后续通知才能重试。恢复与清理复核原绑定、Provider 断线代次及停止状态，失效恢复不继续释放。
@@ -298,6 +303,6 @@ Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，�
 停止会取消等待计时器并限时等待在途恢复，不删除官方写锁或绕过 App Server 单写约束。
 启动失败、启动中停止和正常停止共享同一个组件关闭任务；关闭入口取消绑定恢复计时器，Client 关闭后、存储关闭前限时等待在途恢复；停止后的恢复结果不再触发业务通知或计划任务恢复。异步启动阶段返回后检查停止状态，避免继续启动后续组件。除中断未完成连接所需
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有
-已接收的 Queue 完成释放任务，停止时拒绝新任务并先限时等待，避免 Surface 或 Client 关闭后继续派发。
+已接收的后台完成释放任务，停止时拒绝新任务并先限时等待，避免 Surface 或 Client 关闭后继续处理。
 
 - `relay-metrics-composition.ts`：Relay IPC 与已有 Gateway 指标 Writer 的组合；接收端随 Writer 存活，先等待授权材料准备再发布监听；准备期间关闭会取消 Reader，监听启动返回后再次核对关闭与最新启用状态。结算通过隔离 Worker 按当前私有原子配置异步核对调用方、账户和代次，入队前复核取消与关闭状态，不依赖延迟热加载或入口启用状态；停用身份仍可结算历史调用。不创建第二个数据库写入者或 Core 事件。

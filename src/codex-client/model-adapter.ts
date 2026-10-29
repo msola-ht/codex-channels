@@ -7,12 +7,11 @@ import type {
 
 export function toModelOption(
   model: ModelListResponse["data"][number],
-  includeHidden = false,
 ): ModelOption | null {
   if (typeof model.hidden !== "boolean") {
     throw new Error("Codex 响应缺少有效 model hidden");
   }
-  if (model.hidden && !includeHidden) {
+  if (model.hidden) {
     return null;
   }
   requireNonEmptyString(model.id, "model id");

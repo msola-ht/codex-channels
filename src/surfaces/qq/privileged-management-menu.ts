@@ -106,7 +106,7 @@ export class QqPrivilegedManagementMenu {
   private async execute(context: Context, command: Command, input: string, identity?: ThreadOccupancyIdentity): Promise<ConversationCommandResult> {
     this.assertCurrent(context);
     return this.options.commands.execute(context.target, command, input, context.actorId,
-      () => this.assertCurrent(context), undefined, undefined, undefined, identity);
+      () => this.assertCurrent(context), undefined, undefined, identity);
   }
 
   private async pick(target: ConversationTarget, actorId: string, command: Command, token: string): Promise<QqMenuPanel> {

@@ -9,7 +9,6 @@ import type {
   ConversationTarget,
   OutputEvent,
   SurfaceId,
-  UserMessageIdentity,
 } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 import type { DeliveryCheckpoint } from "./delivery-receipt.js";
@@ -84,10 +83,6 @@ export interface SurfaceScheduledTaskSubmissionContext {
 }
 
 export interface SurfaceOutputPort {
-  /** Observe current official identity synchronously; no network, content, persistence or replay. */
-  observeUserMessageIdentity?(identity: Readonly<UserMessageIdentity>): void;
-  /** Invalidate unused selections only; this does not prove deletion or revoke task output. */
-  observeQueueChanged?(target: ConversationTarget, threadId: string): void;
   deliverySource?: {
     capture(event: OutputEvent): SurfaceDeliverySource | undefined;
     await(reference: SurfaceDeliverySource, signal: AbortSignal): Promise<boolean>;

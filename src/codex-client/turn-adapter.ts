@@ -1,16 +1,13 @@
 import type {
   ReviewStartResponse,
   ReviewTarget as ProtocolReviewTarget,
-  ThreadGoal as ProtocolThreadGoal,
   TurnStartResponse,
   TurnSteerResponse,
   UserInput,
 } from "../codex-protocol/index.js";
 import type {
-  GoalStatus,
   ReviewStarted,
   ReviewTarget,
-  ThreadGoal,
   TurnInput,
   TurnStarted,
 } from "../application/index.js";
@@ -61,53 +58,8 @@ export function toReviewStarted(response: ReviewStartResponse): ReviewStarted {
   };
 }
 
-export function toThreadGoal(goal: ProtocolThreadGoal, expectedThreadId?: string): ThreadGoal {
-  requireString(goal.threadId, "goal thread id");
-  if (expectedThreadId !== undefined && goal.threadId !== expectedThreadId) {
-    throw new Error("Codex Goal 响应与请求 Thread 不一致");
-  }
-  requireString(goal.objective, "goal objective");
-  requireNumber(goal.tokensUsed, "goal tokens used");
-  requireNumber(goal.timeUsedSeconds, "goal time used");
-  requireNumber(goal.createdAt, "goal created at");
-  requireNumber(goal.updatedAt, "goal updated at");
-  if (goal.tokenBudget !== null) {
-    requireNumber(goal.tokenBudget, "goal token budget");
-  }
-  return {
-    threadId: goal.threadId,
-    objective: goal.objective,
-    status: toGoalStatus(goal.status),
-    tokenBudget: goal.tokenBudget,
-    tokensUsed: goal.tokensUsed,
-    timeUsedSeconds: goal.timeUsedSeconds,
-    createdAt: goal.createdAt,
-    updatedAt: goal.updatedAt,
-  };
-}
-
-function toGoalStatus(status: ProtocolThreadGoal["status"]): GoalStatus {
-  switch (status) {
-    case "active":
-    case "paused":
-    case "blocked":
-    case "usageLimited":
-    case "budgetLimited":
-    case "complete":
-      return status;
-    default:
-      throw new Error("Codex Goal 响应包含未知 status");
-  }
-}
-
 function requireString(value: unknown, field: string): asserts value is string {
   if (typeof value !== "string") {
-    throw new Error(`Codex 响应缺少有效 ${field}`);
-  }
-}
-
-function requireNumber(value: unknown, field: string): asserts value is number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`Codex 响应缺少有效 ${field}`);
   }
 }

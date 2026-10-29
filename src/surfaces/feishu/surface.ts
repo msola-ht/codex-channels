@@ -11,7 +11,7 @@ import type {
   ConversationSessionUseCases,
   ScheduledTaskConfirmation,
 } from "../../application/index.js";
-import type { ConversationTarget } from "../../conversation-core/index.js";
+import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -356,6 +356,16 @@ export class FeishuSurface implements SurfaceAdapter {
           assertActive,
         ),
       options.logger,
+      target => {
+        const original = options.service.status(target);
+        return () => {
+          const current = options.service.status(target);
+          if (current.workspaceId !== original.workspaceId || current.cwd !== original.cwd
+            || current.threadId !== original.threadId || current.selectionScope !== original.selectionScope) {
+            throw new UserFacingError("command.authorization-changed", "恢复按钮所属会话已变化，请重新发送 /r 命令。");
+          }
+        };
+      },
     );
     this.inbox = new FeishuInbox({
       logger: options.logger,

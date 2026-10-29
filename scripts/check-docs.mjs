@@ -142,13 +142,11 @@ function checkProtocolIndexMetrics() {
   );
   const methodCount = (file) =>
     [...readFileSync(join(root, file), "utf8").matchAll(/"method": "[^"]+"/gu)].length;
-  const clientRequests = readFileSync(
-    join(root, "src/codex-client/client.ts"),
-    "utf8",
-  );
+  const clientRequests = ["client.ts", "thread-title.ts"]
+    .map(file => readFileSync(join(root, "src/codex-client", file), "utf8")).join("\n");
   const directRequests = new Set(
     [...clientRequests.matchAll(
-      /this\.rpc\.request(?:<[\s\S]*?>)?\(\s*\{\s*method:\s*"([^"]+)"/gu,
+      /\b(?:this\.)?rpc\.request(?:<[\s\S]*?>)?\(\s*\{\s*method:\s*"([^"]+)"/gu,
     )]
       .map((match) => match[1]),
   );

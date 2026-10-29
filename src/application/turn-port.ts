@@ -1,6 +1,4 @@
 import type {
-  GoalStatus,
-  ThreadGoal,
   ThreadApprovalsReviewer,
 } from "../conversation-core/index.js";
 
@@ -48,8 +46,6 @@ export interface ReviewStarted extends TurnStarted {
   threadId: string;
 }
 
-export type { GoalStatus, ThreadGoal };
-
 /**
  * Changes only the loaded Thread's reviewer, without starting a Turn.
  * The application-facing port resolves after authoritative confirmation has
@@ -82,7 +78,4 @@ export interface TurnExecutionPort {
   setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean>;
   compactThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
   startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void, requestAttempted?: () => undefined): Promise<ReviewStarted>;
-  getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null>;
-  setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal>;
-  clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void>;
 }

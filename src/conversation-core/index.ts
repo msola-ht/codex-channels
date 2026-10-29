@@ -1,12 +1,11 @@
 export { ConversationCore } from "./core.js";
-export type { ConversationInputEvent, UserMessageIdentity } from "./input-events.js";
+export type { ConversationInputEvent } from "./input-events.js";
 export type {
   AccountStatus,
   CompletionAccountStatus,
   AsyncUserQuestion,
   AuthMode,
   AutoApprovalReviewDetails,
-  GoalStatus,
   McpServerStartupFailureReason,
   McpServerStartupState,
   McpServerStatus,
@@ -17,7 +16,6 @@ export type {
   RateLimitWindow,
   TurnTaskMetricsSummary,
   ResponseUsageSummary,
-  ThreadGoal,
   ThreadApprovalsReviewer,
   ThreadTokenUsage,
   TokenUsageBreakdown,

@@ -42,7 +42,7 @@
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：Codex、飞书与微信的上游源码基线及待升级候选。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、0.164.0 关联适配与升级决策、
   不采用原因、重新评估条件与基线升级影响。
-- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Thread Queue、
+- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Queue 只读保护、
   分页历史与 Revert 的授权边界和验收链路。
 - [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：
   OpenAI Thread 官方估算合入现有 `/usage` 的数据口径、降级、模块与验证边界。
@@ -64,6 +64,8 @@
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。
 
 ## 验收与开放补证
+
+- [`docs/thread-auto-title-design.md`](docs/thread-auto-title-design.md)：渠道会话自动命名设计与验收记录，已部署并确认一次线上命名；记录授权提交、隔离生成与恢复、本地实际 App Server 观察，以及其他 Provider 和四渠道开放验收。
 
 - [`docs/ollama-cloud-probe.md`](docs/ollama-cloud-probe.md)：OLC 分批提交、隔离路径与反例摘要，以及真实云端、平台和部署的开放验收。
 - [`docs/qq-delivery-uncertain-review-2026-10-27.md`](docs/qq-delivery-uncertain-review-2026-10-27.md)：QQ 正文投递事故更正、关联修复、用户部署后的真实长文交付与全链路复审；新增低频阶段诊断待部署。

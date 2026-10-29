@@ -14,7 +14,7 @@ import { qqLiteralMarkdown } from "./message-markdown.js";
 import { planText } from "./outbox.js";
 import { QQ_BUTTON_LABEL_CHARACTERS, QqProtocolError } from "./protocol.js";
 
-type ScheduledTaskOperationContext = NonNullable<Parameters<ConversationCommandExecutor["execute"]>[7]>;
+type ScheduledTaskOperationContext = NonNullable<Parameters<ConversationCommandExecutor["execute"]>[6]>;
 
 interface Context extends ScheduledTaskOperationContext {
   readonly target: ConversationTarget;
@@ -110,7 +110,7 @@ export class QqScheduleMenu {
   private async execute(context: Context, input: string): Promise<ConversationCommandResult> {
     context.assertCurrent();
     const result = await this.options.commands.execute(context.target, "schedule", input, context.actorId,
-      () => context.assertCurrent(), undefined, undefined, context);
+      () => context.assertCurrent(), undefined, context);
     context.assertCurrent();
     return result;
   }

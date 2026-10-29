@@ -30,6 +30,14 @@ export interface FeishuApiDiagnostics {
   platformRequestId?: string;
 }
 
+/** An observed nonzero business response, not a transport failure or unknown result. */
+export function isFeishuBusinessRejection(error: unknown): boolean {
+  return error instanceof FeishuMessageError
+    && (error.code === "invalid-response" || error.code === "rate-limited")
+    && Number.isSafeInteger(error.diagnostics.platformCode)
+    && error.diagnostics.platformCode! > 0;
+}
+
 /** Only machine-readable diagnostics: never retain the SDK error, request, body or headers. */
 export function feishuApiDiagnostics(error: unknown): FeishuApiDiagnostics {
   if (error instanceof FeishuMessageError) return error.diagnostics;
