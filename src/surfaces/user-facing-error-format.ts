@@ -20,7 +20,9 @@ export function formatSurfaceUserFacingError(
     case "mcp.oauth.unavailable":
       return "MCP 登录跟踪暂不可用，请先用 /mcp 核对实际认证状态，再决定是否重新登录";
     case "hooks.usage":
-      return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
+      return "用法：/hooks [page N|列表选择标识|trust <标识>|trust all|enable <标识>|disable <标识>|confirm <一次性令牌>]";
+    case "hooks.nothing-to-trust":
+      return "当前 Workspace 没有待信任的非受管 Hook，无需写入";
     case "hooks.actor-required":
     case "hooks.forbidden":
       return "当前用户身份或工作区授权无法确认，已拒绝 Hook 操作";

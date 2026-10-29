@@ -999,7 +999,7 @@ export class TelegramSurface {
         result,
       );
     });
-    this.bot.callbackQuery(/^hooks:(?:page:[1-9]\d*|(?:trust|enable|disable):[0-9a-f]{16}\.[1-9]\d*|confirm:[0-9a-f]{32}|[0-9a-f]{16}\.[1-9]\d*)$/, async (context) => {
+    this.bot.callbackQuery(/^hooks:(?:page:[1-9]\d*|trust:all|(?:trust|enable|disable):[0-9a-f]{16}\.[1-9]\d*|confirm:[0-9a-f]{32}|[0-9a-f]{16}\.[1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在处理 Hooks" });
       const input = context.callbackQuery.data.slice("hooks:".length).replace(":", " ");
       const result = await this.commands.execute(

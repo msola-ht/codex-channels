@@ -150,7 +150,7 @@ Provider 路由层为所有转发通知附上实际连接的 Provider 路由键�
   与来源路径复用凭据脱敏、控制字符清理和限长；关键展示信息改变、来源未知，以及缺少执行内容的
   prompt/agent 及缺少输入模板的 MCP Tool 处理器均标记为不可审阅；命令条目同时提供安全整数
   timeout、async 和 additionalContext spill 阈值。Hook key 仅用于内部精确定位，不作为渠道展示文本。
-  状态写入只允许 trust/enable/disable，通过 `hooks.state` 的 upsert 保留其他 Hook 与状态字段。
+  状态写入只允许 trust/trust-all/enable/disable，通过 `hooks.state` 的 upsert 保留其他 Hook 与状态字段；批量信任在同一版本保护写入中提交全部 key/hash，不逐项写入。
 - `notification-adapter.ts`：稳定导出门面，只 re-export 四个协议入口与 `AutoApprovalReviewEvent` 类型；具体映射按目标消费者拆分到下列文件，其它模块仍从本路径导入。
 - `notification-conversation-events.ts`：把官方 Notification 转换为 Conversation Core 拥有的稳定事件；异步 Agent 消息保留 `delivery` 与已校验的问题，按过程消息处理其阶段；
   `hook/completed` 保留 Thread、运行 ID、已知触发事件及上游终态，不按执行模式额外过滤；忽略 `hook/started`，不转发输出条目、状态自由文本或路径；

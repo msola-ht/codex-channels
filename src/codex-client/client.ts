@@ -40,7 +40,7 @@ import type {
   ThreadApprovalsReviewerPort,
   HookConfigPort,
   HookCatalog,
-  HookAction,
+  HookWriteInput,
   GenerateThreadTitleRequest,
   GenerateThreadTitleResult,
   SetGeneratedThreadNameRequest,
@@ -1150,12 +1150,7 @@ export class CodexAppServerClient implements
     return (await this.readUserConfigSnapshot({ ...(beforeSubmit ? { beforeSubmit } : {}) })).version;
   }
 
-  async writeHookState(_modelProvider: string, input: {
-    key: string;
-    currentHash: string;
-    action: HookAction;
-    expectedVersion: string;
-  }, beforeSubmit?: () => void): Promise<{ refreshFailedProviders: string[] }> {
+  async writeHookState(_modelProvider: string, input: HookWriteInput, beforeSubmit?: () => void): Promise<{ refreshFailedProviders: string[] }> {
     await this.rpc.request({
       method: "config/batchWrite",
       params: toHookStateWrite(input),

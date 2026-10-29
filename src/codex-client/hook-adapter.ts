@@ -1,4 +1,4 @@
-import type { HookAction, HookCatalog, HookEntry } from "../application/index.js";
+import type { HookWriteInput, HookCatalog, HookEntry } from "../application/index.js";
 import type {
   ConfigBatchWriteParams,
   HookMetadata,
@@ -102,24 +102,25 @@ function toHookEntry(hook: HookMetadata): HookEntry {
   };
 }
 
-export function toHookStateWrite(input: {
-  key: string;
-  currentHash: string;
-  action: HookAction;
-  expectedVersion: string;
-}): ConfigBatchWriteParams {
-  const key = requiredIdentifier(input.key, "key");
-  const currentHash = requiredIdentifier(input.currentHash, "currentHash");
+export function toHookStateWrite(input: HookWriteInput): ConfigBatchWriteParams {
   const expectedVersion = requiredIdentifier(input.expectedVersion, "expectedVersion");
-  if (input.action !== "trust" && input.action !== "enable" && input.action !== "disable") {
+  if (input.action !== "trust-all" && input.action !== "trust" && input.action !== "enable" && input.action !== "disable") {
     throw new Error("不支持的 Hook 操作");
   }
+  const hooks = input.action === "trust-all" ? input.hooks : [input];
+  if (!hooks.length || new Set(hooks.map(hook => hook.key)).size !== hooks.length) {
+    throw new Error("Hook 写入列表为空或包含重复标识");
+  }
+  const value = Object.fromEntries(hooks.map(hook => {
+    const key = requiredIdentifier(hook.key, "key");
+    const currentHash = requiredIdentifier(hook.currentHash, "currentHash");
+    return [key, input.action === "trust" || input.action === "trust-all"
+      ? { trusted_hash: currentHash } : { enabled: input.action === "enable" }];
+  }));
   return {
     edits: [{
       keyPath: "hooks.state",
-      value: { [key]: input.action === "trust"
-        ? { trusted_hash: currentHash }
-        : { enabled: input.action === "enable" } },
+      value,
       mergeStrategy: "upsert",
     }],
     expectedVersion,
