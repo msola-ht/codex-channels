@@ -162,6 +162,10 @@ export function toAccountRateLimits(
     : [[response.rateLimits.limitId ?? "codex", response.rateLimits] as const];
   return {
     limits: entries.map(([fallbackId, snapshot]) => toAccountRateLimit(snapshot, fallbackId)),
+    ordinaryUsageLimit: toAccountRateLimit(
+      response.rateLimits,
+      response.rateLimits.limitId ?? "codex",
+    ),
     resetCreditsAvailable: response.rateLimitResetCredits
       ? requiredMetric(
           response.rateLimitResetCredits.availableCount,

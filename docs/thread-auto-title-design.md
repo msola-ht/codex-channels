@@ -42,7 +42,7 @@ Provider 指标记录。实现阶段须在用户指南说明触发范围、模�
 [临时请求隔离](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/tui/src/temporary_structured_request.rs)、
 [上游回写](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/tui/src/app/event_dispatch.rs)、
 [服务端命名与取消订阅](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/app-server/src/request_processors/thread_processor.rs)。
-本地关联入口见后文文件分工；所有事实为源码审查结果，未进行真实模型请求或平台投递。
+本地关联入口见后文文件分工；本节列出的事实来自最初的源码审查，当时未进行真实模型请求或平台投递。后续实际观察见下文验收记录。
 
 ## 输入归属与触发
 
@@ -327,7 +327,7 @@ App Server，不访问真实账户，不发送平台消息，不重启共享服�
 | Gateway 启动期间停止、正常关闭、重载、重连 | 准入立即停止；五秒总清理等待；未确认资源不因断线判为已停止；普通重连保留隔离；共享 Server 存活 |
 | 四渠道名称事实与历史列表 | 读取同一官方名称；独立通知遵守既有渠道政策，微信只验证列表及后续完成展示；不把既发消息当作会自动更新 |
 
-真实模型、四个平台以及 macOS/Windows 服务路径尚未观察；实施时按可用环境逐项记录。
+一次线上模型生成、官方名称写入与用户可见通知已观察；其余 Provider、四渠道完整路径以及 macOS/Windows 服务恢复仍待验收，按可用环境逐项记录。
 不为方案审查调用真实账户、发送外部消息、部署或重启用户服务。
 
 ## 独立方案复审

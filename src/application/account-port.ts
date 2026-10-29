@@ -93,6 +93,8 @@ export interface AccountRateLimit {
 
 export interface AccountRateLimits {
   limits: AccountRateLimit[];
+  /** 官方普通用量桶，供账户快照的余额与周额度展示使用。 */
+  ordinaryUsageLimit: AccountRateLimit;
   resetCreditsAvailable: AccountMetric | null;
   /**
    * 每条服务端重置券明细的到期时间；`null` 元素表示该券没有到期时间。
