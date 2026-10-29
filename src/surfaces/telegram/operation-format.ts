@@ -79,7 +79,7 @@ function renderOperationRecords(
     const countLabel = count > 1 ? ` (×${count})` : "";
     const metadata = operationMetadata(record);
     const heading =
-      `${operationIcon(record)} <b>${operationTitle(record)}${countLabel} · ${operationStatus(record.status)}</b>`
+      `<b>${operationTitle(record)}${countLabel} · ${operationStatus(record.status)}</b>`
       + (metadata.length > 0 ? ` · ${metadata.join(" · ")}` : "");
     if (display === "compact") {
       const detail = record.detail ? compactOperationDetail(record.detail) : null;
@@ -128,35 +128,6 @@ function operationGroupKey(record: OperationUpdate): string {
     record.detail ?? null,
     record.status,
   ]);
-}
-
-function operationIcon(record: OperationUpdate): string {
-  const icon = record.commandExploration === undefined ? ({
-    command: "💻",
-    fileChange: "🔧",
-    mcpTool: "🔌",
-    dynamicTool: "🧰",
-    subagent: "🤖",
-    webSearch: "🌐",
-    imageView: "🖼️",
-    imageGeneration: "🎨",
-    sleep: "⏳",
-    plan: "📋",
-    contextCompaction: "🗜️",
-    reviewMode: "🔍",
-  } as const)[record.kind] : ({
-    read: "📖",
-    search: "🔍",
-    listFiles: "🗂️",
-    mixed: "📖",
-  } as const)[record.commandExploration];
-  const statusIcon = ({
-    running: "⏳",
-    completed: "",
-    failed: "❌",
-    declined: "🚫",
-  } as const)[record.status];
-  return statusIcon ? `${icon} ${statusIcon}` : icon;
 }
 
 function escapeTelegramHtml(value: string): string {

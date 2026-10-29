@@ -187,6 +187,14 @@ export function createTelegramSurface(
 type AutoReviewSelectionScope = { threadId: string };
 type CommandReplyScope = { workspaceId: string; cwd: string | undefined; selectionScope: string | undefined; threadId: string | undefined };
 
+/** Recovery logs errors outside the Surface; retain only safe platform diagnostics. */
+class TelegramBindingRestoreError extends Error {
+  constructor(error: unknown) {
+    super("Telegram 恢复私聊核验失败", { cause: telegramErrorMetadata(error) });
+    this.name = "TelegramBindingRestoreError";
+  }
+}
+
 export class TelegramSurface {
   readonly surface = "telegram" as const;
   readonly accountId = telegramDefaultAccountId;
@@ -214,6 +222,7 @@ export class TelegramSurface {
   private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
   private readonly receivedUpdates = new WeakSet<object>();
   private readonly privateConversations = new Map<string, string>();
+  private readonly bindingRestoreAbort = new AbortController();
   private readonly attachmentStops = new WeakSet<object>();
   private readonly rejectedAttachmentStops = new WeakSet<object>();
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
@@ -428,6 +437,37 @@ export class TelegramSurface {
       && this.privateConversations.has(target.conversationId);
   }
 
+  async prepareBindingRestore(target: ConversationTarget, signal: AbortSignal): Promise<void> {
+    const actorId = target.conversationId;
+    const authorized = () => !this.stopping && target.surface === this.surface
+      && target.accountId === this.accountId
+      && this.actorRegistry?.actors(target).includes(actorId) === true
+      && this.access.isAllowed({ target, actorId });
+    const active = AbortSignal.any([signal, this.bindingRestoreAbort.signal,
+      this.apiExecutor.authorizationSignal(target.conversationId), AbortSignal.timeout(10_000)]);
+    active.throwIfAborted();
+    if (!authorized()) throw new Error("Telegram 会话恢复缺少有效的原聊天授权");
+    if (this.isPrivateConversation(target)) return;
+    let chat: Awaited<ReturnType<typeof this.bot.api.getChat>>;
+    try {
+      chat = await this.apiExecutor.call(
+        { chatId: target.conversationId, operation: "getChat", critical: false },
+        requestSignal => this.bot.api.getChat(target.conversationId, telegramAbortSignal(requestSignal)),
+        active,
+      );
+    } catch (error) {
+      this.logger.warn({ ...telegramErrorMetadata(error), conversationId: target.conversationId },
+        "Telegram 恢复私聊核验失败，保留绑定等待恢复重试");
+      throw new TelegramBindingRestoreError(error);
+    }
+    active.throwIfAborted();
+    if (!authorized()) throw new Error("Telegram 会话恢复授权已变化");
+    if (chat.type !== "private" || String(chat.id) !== target.conversationId) {
+      throw new Error("Telegram 会话恢复未取得匹配的私聊证明");
+    }
+    this.rememberPrivateConversation(target, actorId);
+  }
+
   private rememberPrivateConversation(target: ConversationTarget, actorId: string): void {
     this.privateConversations.set(target.conversationId, actorId);
     if (this.privateConversations.size > 4_096) {
@@ -523,6 +563,7 @@ export class TelegramSurface {
   private async stopOnce(): Promise<void> {
     const shutdown = new SurfaceShutdown();
     this.stopping = true;
+    this.bindingRestoreAbort.abort();
     this.privateConversations.clear();
     this.attachmentInputs.close();
     const videoClose = shutdown.run("videos", () => this.videoInput?.close());

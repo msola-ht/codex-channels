@@ -130,6 +130,8 @@ export interface SurfaceAdapter {
   };
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
+  /** Revalidate platform conversation identity before restoring its Thread subscription. */
+  prepareBindingRestore?(target: ConversationTarget, signal: AbortSignal): Promise<void>;
   takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
   prepareScheduledTaskSubmission?(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission;
   sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal, format?: "markdown"): Promise<void>;
