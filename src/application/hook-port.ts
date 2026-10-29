@@ -24,11 +24,15 @@ export interface HookCatalog {
   errorCount: number;
 }
 
+export type HookStartupSummary =
+  | { kind: "available"; untrusted: number; modified: number; warningCount: number; errorCount: number }
+  | { kind: "unavailable" };
+
 /** Surface-owned review fidelity check, re-evaluated before every trust operation. */
 export type HookReviewPolicy = (surface: string, hook: HookEntry) => boolean;
 
 export interface HookConfigPort {
-  listHooks(cwd: string, modelProvider: string, beforeSubmit?: () => void): Promise<HookCatalog>;
+  listHooks(cwd: string, modelProvider: string, beforeSubmit?: () => void, signal?: AbortSignal): Promise<HookCatalog>;
   readHookConfigVersion(modelProvider: string, beforeSubmit?: () => void): Promise<string>;
   writeHookState(modelProvider: string, input: {
     key: string;

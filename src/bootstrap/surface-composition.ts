@@ -159,6 +159,7 @@ function createQqModule(
         const status = await options.service.statusForDisplay(target, signal);
         const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
         return renderQqStartupNotification(options.config.workspaces, status, {
+          hooks: await options.startupHooks(target, status, signal),
           platform: process.platform, architecture: process.arch,
           presentationDetail: displaySettings(target).presentationDetail,
           displayPreset: identifyMessageDisplayPreset(displaySettings(target), supportedMessageDisplayFields({ surface: "qq", chat_kind: "direct" })),
@@ -255,6 +256,7 @@ function createWeixinModule(
           options.config.workspaces,
           status,
           {
+            hooks: await options.startupHooks(target, status, signal),
             platform: process.platform,
             architecture: process.arch,
             ...(options.config.codexTimezone === undefined
@@ -372,6 +374,14 @@ function createFeishuModule(
             },
             signal,
           );
+          const hooks = await options.startupHooks({
+            surface: "feishu", accountId: config.appId, conversationId: chatId,
+          }, status, signal).catch(() => {
+            signal.throwIfAborted();
+            options.logger.warn({ surface: "feishu", accountId: config.appId }, "启动 Hook 查询目标已失效，跳过该收件人");
+            return undefined;
+          });
+          if (hooks === undefined) continue;
           const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
           messages.push({
             chatId,
@@ -379,6 +389,7 @@ function createFeishuModule(
               options.config.workspaces,
               status,
               {
+                hooks,
                 platform: process.platform,
                 architecture: process.arch,
                 ...(options.config.codexTimezone === undefined
@@ -457,6 +468,7 @@ function createTelegramModule(
     commands: options.commands,
     access,
     startupRecipients: config.telegramAllowedUserIds,
+    startupHooks: options.startupHooks,
     workspaces: config.workspaces,
     uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),
     videoDirectory: join(dirname(config.stateDatabasePath), "uploads", "video"),

@@ -6,6 +6,7 @@ import startupNetworkPolicy from "../../startup-network-policy.json" with { type
 import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
+import { createStartupHooksReader } from "./startup-hooks.js";
 import { withOutputExecutionAdmission } from "./output-execution-admission.js";
 import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay-metrics-composition.js";
@@ -1181,6 +1182,14 @@ export abstract class GatewayComponentGraph {
       config,
       service,
       commands,
+      startupHooks: createStartupHooksReader({
+        port: this.codex,
+        scope: target => service.status(target),
+        allowed: target => this.surfaceModules.some(module => module.notificationTargets?.().some(candidate =>
+          candidate.surface === target.surface && candidate.accountId === target.accountId
+          && candidate.conversationId === target.conversationId)),
+        logger,
+      }),
       bindings: this.bindings,
       logger,
       gatewayVersion: codexCliVersion,

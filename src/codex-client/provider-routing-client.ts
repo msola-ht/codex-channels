@@ -825,14 +825,17 @@ export class ProviderRoutingClient {
   listHooks(
     ...args: Parameters<ProviderClientInstance["listHooks"]>
   ): ReturnType<ProviderClientInstance["listHooks"]> {
-    const [, modelProvider, beforeSubmit] = args;
+    const [, modelProvider, beforeSubmit, signal] = args;
+    signal?.throwIfAborted();
     beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () => {
+      signal?.throwIfAborted();
       beforeSubmit?.();
       const client = await this.ensureClient(modelProvider);
+      signal?.throwIfAborted();
       beforeSubmit?.();
       return client.listHooks(...args);
-    });
+    }, signal);
   }
 
   readHookConfigVersion(

@@ -1099,9 +1099,12 @@ Standard/Fast/Ultrafast；按当前模型能力和对应档位开关提供加速
 
 ### Hook 列表、信任与启停
 
-飞书、Telegram 和微信共用 `/hooks`，按当前 Workspace 查询当前会话所属 Provider 的
+Gateway 启动通知会查询接收会话当前工作区和 Provider 的 Hook 状态，在 QQ、飞书、Telegram、微信中提示未信任或定义已变更的 Hook 数量，并引导发送 `/hooks` 逐项审查。提示不受消息详情档位限制；仍沿用各渠道已授权收件人与投递窗口。查询超时或失败会明确提示“信任状态未能确认”，不会当作全部已信任；没有待审查项和目录告警时不额外显示。
+这是启动时的只读检查，不是自动信任或自动启用，也不代替已有 `/hooks` 的预览与确认。只检查当前工作区，不扫描全部工作区；已绑定会话尚未恢复时显示未确认，不拿默认 Provider 代查；查询期间切换会话、恢复状态变化或撤权时丢弃旧结果。
+
+QQ、飞书、Telegram 和微信共用 `/hooks`，按当前 Workspace 查询当前会话所属 Provider 的
 App Server；尚未绑定会话时使用已确定的模型 Provider，无法确定时先用 `/model` 选择。
-飞书、Telegram 提供操作按钮，三个渠道均可使用文本命令：
+QQ、飞书、Telegram 提供操作按钮，四个渠道均可使用文本命令：
 
 ```text
 /hooks

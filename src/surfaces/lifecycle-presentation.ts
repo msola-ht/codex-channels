@@ -1,4 +1,4 @@
-import type { ConversationStatus } from "../application/index.js";
+import type { ConversationStatus, HookStartupSummary } from "../application/index.js";
 import type {
   OutputEvent,
   ThreadApprovalsReviewer,
@@ -147,6 +147,7 @@ export interface LifecyclePresentationSection {
 }
 
 export interface StartupRuntimeInfo {
+  hooks?: HookStartupSummary;
   platform: NodeJS.Platform;
   architecture: string;
   appServerTimezone?: string;
@@ -226,6 +227,16 @@ export function createStartupPresentation(
           : runtime.displayPreset === "custom" ? [{ label: "显示", value: "自定义模式" }] : []),
       ].map(field => ({ ...field, value: field.value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ") })) : []),
       ...openAiConnectivityFields(runtime.openAiConnectivity),
+      ...(runtime.hooks?.kind === "unavailable"
+        ? [{ label: "Hooks", value: "信任状态未能确认，请发送 /hooks 检查；网关不会自动信任。" }]
+        : runtime.hooks?.kind === "available" ? [
+          ...(runtime.hooks.untrusted + runtime.hooks.modified > 0
+            ? [{ label: "Hooks 待审查", value: `未信任 ${runtime.hooks.untrusted} 项，已变更 ${runtime.hooks.modified} 项；请发送 /hooks 查看并逐项审查，网关不会自动信任。` }]
+            : []),
+          ...(runtime.hooks.warningCount + runtime.hooks.errorCount > 0
+            ? [{ label: "Hooks 检查", value: `${runtime.hooks.warningCount} 项警告，${runtime.hooks.errorCount} 项错误；请发送 /hooks 或在本机检查配置。` }]
+            : []),
+        ] : []),
       ...(runtime.officialOpenAiAuthenticated === false
         ? [{ label: "OpenAI 官方", value: "未登录；请运行 codex login，或发送 /model 选择第三方提供商" }]
         : []),

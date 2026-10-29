@@ -1135,13 +1135,13 @@ export class CodexAppServerClient implements
     };
   }
 
-  async listHooks(cwd: string, _modelProvider: string, beforeSubmit?: () => void): Promise<HookCatalog> {
+  async listHooks(cwd: string, _modelProvider: string, beforeSubmit?: () => void, signal?: AbortSignal): Promise<HookCatalog> {
     void _modelProvider;
     const params: HooksListParams = { cwds: [cwd] };
     const response = await this.rpc.request<HooksListResponse>({
       method: "hooks/list",
       params,
-    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}), ...(signal ? { signal } : {}) });
     return toHookCatalog(response, cwd);
   }
 
