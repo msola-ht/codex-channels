@@ -34,7 +34,7 @@ export interface BindingRestoreCoordinatorOptions {
   codex: Pick<ProviderRoutingClient, "knownProvider">;
   router: SessionRouter;
   output: EventBus<OutputEvent>;
-  enabledSurfaces(): readonly Pick<SurfaceAdapter, "surface" | "accountId">[];
+  enabledSurfaces(): readonly Pick<SurfaceAdapter, "surface" | "accountId" | "prepareBindingRestore">[];
   canRestoreBinding?(binding: ConversationBinding): boolean;
   scheduledRecovery(): ScheduledBindingRecoveryPort | undefined;
   releaseBackground(threadId: string, isCurrent: () => boolean): Promise<boolean>;
@@ -215,6 +215,11 @@ export class BindingRestoreCoordinator {
           return modelProvider === undefined
             ? {}
             : { modelProvider };
+        },
+        async (binding) => {
+          const surface = this.options.enabledSurfaces().find(candidate =>
+            candidate.surface === binding.target.surface && candidate.accountId === binding.target.accountId);
+          await surface?.prepareBindingRestore?.(binding.target, this.recoveryAbort.signal);
         },
       );
       // Router has released the per-Thread restore locks. Background cleanup

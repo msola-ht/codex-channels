@@ -585,6 +585,7 @@ export class SessionRouter {
     ) => boolean = () => true,
     observeRestore?: ThreadRestoreObserver,
     optionsForBinding: (binding: ConversationBinding) => ThreadStartOptions = () => ({}),
+    prepareBinding?: (binding: ConversationBinding) => Promise<void>,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
@@ -602,6 +603,8 @@ export class SessionRouter {
           const wasBackground = this.bindings.isBackground(binding.threadId);
           try {
             const workspace = this.workspaces.require(binding.workspaceId);
+            await prepareBinding?.(binding);
+            if (!isCurrent()) return undefined;
             const historical = await this.codex.readThread(binding.threadId);
             if (!isCurrent()) return undefined;
             observation = observeRestore?.(binding.threadId);
