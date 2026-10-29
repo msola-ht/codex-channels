@@ -56,8 +56,7 @@ export function formatTelegramOperationSummary(
     : ` · ${formatElapsedDuration(summary.totalDurationMs)}`;
   const groups = operationSummaryGroups(summary);
   return [
-    "<b>操作过程</b>",
-    "",
+    ...(display === "detailed" ? [] : ["<b>操作过程</b>", ""]),
     `<b>工具查询 · 已完成</b>${duration}`,
     ...groups.flatMap((group) => [
       `• ${group.label}：${group.count} 次`,
@@ -75,7 +74,7 @@ function renderOperationRecords(
   records: OperationUpdate[],
   display: Exclude<OperationUpdateDisplay, "hidden">,
 ): string {
-  const lines = ["<b>操作过程</b>"];
+  const lines: string[] = display === "detailed" ? [] : ["<b>操作过程</b>"];
   for (const { record, count } of groupOperations(records)) {
     const countLabel = count > 1 ? ` (×${count})` : "";
     const metadata = operationMetadata(record);
@@ -90,7 +89,8 @@ function renderOperationRecords(
       );
       continue;
     }
-    lines.push("", heading);
+    if (lines.length > 0) lines.push("");
+    lines.push(heading);
     if (record.detail) {
       const detail = escapeTelegramHtml(display === "detailed"
         ? detailedOperationDetail(record) : redactOperationDetail(record.detail));
