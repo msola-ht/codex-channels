@@ -1,5 +1,6 @@
 export type UserFacingErrorCode =
   | "hooks.usage"
+  | "hooks.nothing-to-trust"
   | "hooks.actor-required"
   | "hooks.provider-required"
   | "hooks.page-invalid"

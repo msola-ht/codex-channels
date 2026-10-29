@@ -81,6 +81,7 @@ const helpSections = [
       line(command("plugin", "<名称、完整 ID 或序号> [任务]")),
       line(command("hooks", "[page N|列表选择标识]")),
       line(command("hooks", "trust|enable|disable <列表选择标识>"), command("hooks", "confirm <一次性令牌>")),
+      line(command("hooks", "trust all")),
       line(command("usage"), command("limits"), command("permissions")),
       line(command("limits", "reset [页码]"), command("limits", "reset use <券ID>"), command("limits", "reset confirm|cancel <令牌>")),
       line(command("metrics", "session")),

@@ -26,8 +26,8 @@ interface Snapshot extends Context {
 }
 interface Confirmation extends Context {
   capturedAt: number;
-  hook: HookEntry;
-  action: HookAction;
+  hooks: HookEntry[];
+  action: HookAction | "trust-all";
   version: string;
   view: HookCommandView;
 }
@@ -72,11 +72,14 @@ export class ConversationHookService {
       return this.confirm(context, parts[1]!, beforeSubmit);
     }
     const action = parts[0];
+    if (parts.length === 2 && action === "trust" && parts[1] === "all") {
+      return this.previewAll(context, beforeSubmit);
+    }
     if (parts.length === 1) return this.detail(context, parts[0]!, beforeSubmit);
     if (parts.length === 2 && (action === "trust" || action === "enable" || action === "disable")) {
       return this.preview(context, parts[1]!, action, beforeSubmit);
     }
-    throw new UserFacingError("hooks.usage", "用法：/hooks [page 页码|选择编号|trust 选择编号|enable 选择编号|disable 选择编号|confirm 确认码]");
+    throw new UserFacingError("hooks.usage", "用法：/hooks [page 页码|选择编号|trust 选择编号|trust all|enable 选择编号|disable 选择编号|confirm 确认码]");
   }
 
   private context(target: ConversationTarget, actorId?: string): Context {
@@ -133,8 +136,25 @@ export class ConversationHookService {
     const token = randomBytes(16).toString("hex");
     const view = { ...selection.view, detail: { selector, hook } };
     this.prune(this.confirmations, true);
-    this.confirmations.set(token, { ...context, capturedAt: performance.now(), hook, action, version, view });
+    this.confirmations.set(token, { ...context, capturedAt: performance.now(), hooks: [hook], action, version, view });
     return { ...view, confirmation: { token, action } };
+  }
+
+  private async previewAll(context: Context, beforeSubmit: () => void): Promise<HookCommandView> {
+    const version = await this.version(context, beforeSubmit);
+    const catalog = await this.read(context, beforeSubmit);
+    if (catalog.errorCount) throw expired();
+    const hooks = catalog.hooks.filter(needsTrust);
+    if (!hooks.length) throw new UserFacingError("hooks.nothing-to-trust", "当前 Workspace 没有待信任的非受管 Hook，无需写入");
+    const view: HookCommandView = {
+      workspaceId: context.workspaceId, provider: context.provider, entries: [],
+      warningCount: catalog.warningCount, errorCount: catalog.errorCount,
+      page: 1, pageCount: 1, bulkCount: hooks.length,
+    };
+    const token = randomBytes(16).toString("hex");
+    this.prune(this.confirmations, true);
+    this.confirmations.set(token, { ...context, capturedAt: performance.now(), hooks, action: "trust-all", version, view });
+    return { ...view, confirmation: { token, action: "trust-all" } };
   }
 
   private async confirm(context: Context, token: string, beforeSubmit: () => void): Promise<HookCommandView> {
@@ -143,8 +163,15 @@ export class ConversationHookService {
     this.confirmations.delete(token);
     if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
     if (await this.version(context, beforeSubmit) !== pending.version) throw expired();
-    const hook = await this.recheck(context, pending.hook, beforeSubmit);
-    requireAction(hook, pending.action);
+    const catalogBefore = await this.read(context, beforeSubmit);
+    const hooks = pending.hooks.map(expected => {
+      const actual = catalogBefore.hooks.find(hook => hook.key === expected.key);
+      if (catalogBefore.errorCount || !actual || !sameHookState(actual, expected)) throw expired();
+      if (pending.action !== "trust-all") requireAction(actual, pending.action);
+      else if (!needsTrust(actual)) throw expired();
+      return actual;
+    });
+    if (pending.action === "trust-all" && catalogBefore.hooks.filter(needsTrust).length !== hooks.length) throw expired();
     beforeSubmit();
     if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
     let refreshFailedProviders: string[];
@@ -153,16 +180,18 @@ export class ConversationHookService {
       try {
         beforeSubmit();
         if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
-        requireAction({ ...hook, reviewable: hook.reviewable && this.reviewPolicy(context.surface, hook) }, pending.action);
+        if (pending.action !== "trust-all") for (const hook of hooks) {
+          requireAction({ ...hook, reviewable: hook.reviewable && this.reviewPolicy(context.surface, hook) }, pending.action);
+        }
       } catch (error) {
         submissionDenied = true;
         throw error;
       }
     };
     try {
-      ({ refreshFailedProviders } = await this.port.writeHookState(context.provider, {
-        key: hook.key, currentHash: hook.currentHash, action: pending.action, expectedVersion: pending.version,
-      }, beforeWrite));
+      ({ refreshFailedProviders } = await this.port.writeHookState(context.provider, pending.action === "trust-all"
+        ? { hooks: hooks.map(({ key, currentHash }) => ({ key, currentHash })), action: "trust-all", expectedVersion: pending.version }
+        : { key: hooks[0]!.key, currentHash: hooks[0]!.currentHash, action: pending.action, expectedVersion: pending.version }, beforeWrite));
     } catch (error) {
       if (submissionDenied) throw error;
       throw new UserFacingError("hooks.write-unconfirmed", "Hook 设置未确认保存，可能发生配置冲突或连接中断。请重新执行 /hooks 核对；不会自动重试");
@@ -178,12 +207,13 @@ export class ConversationHookService {
     try { catalog = await this.read(context); } catch {
       throw new UserFacingError("hooks.readback-failed", "Hook 配置写入已返回成功，但回读失败。请执行 /hooks 核对状态；不会重复写入");
     }
-    const actual = catalog.hooks.find(entry => entry.key === hook.key && entry.currentHash === hook.currentHash);
-    if (catalog.errorCount || !actual || (pending.action === "trust"
-      ? actual.trustStatus !== "trusted" : actual.enabled !== (pending.action === "enable"))) {
+    const actuals = hooks.map(hook => catalog.hooks.find(entry => entry.key === hook.key && entry.currentHash === hook.currentHash));
+    if (catalog.errorCount || actuals.some((actual, index) => !actual || (pending.action === "trust" || pending.action === "trust-all"
+      ? actual.trustStatus !== "trusted" || actual.enabled !== hooks[index]!.enabled
+      : actual.enabled !== (pending.action === "enable")))) {
       throw new UserFacingError("hooks.state-unconfirmed", "Hook 配置已提交，但未读到预期状态。请重新执行 /hooks 核对当前配置与策略");
     }
-    return { ...pending.view, entries: [], detail: { selector: "", hook: actual },
+    return { ...pending.view, entries: [], ...(pending.action === "trust-all" ? {} : { detail: { selector: "", hook: actuals[0]! } }),
       warningCount: catalog.warningCount, errorCount: catalog.errorCount, updated: pending.action,
       refreshFailedProviders };
   }
@@ -191,9 +221,7 @@ export class ConversationHookService {
   private async recheck(context: Context, expected: HookEntry, beforeSubmit: () => void): Promise<HookEntry> {
     const catalog = await this.read(context, beforeSubmit);
     const hook = catalog.hooks.find(entry => entry.key === expected.key);
-    if (catalog.errorCount || !hook || hook.currentHash !== expected.currentHash
-      || hook.isManaged !== expected.isManaged || hook.enabled !== expected.enabled
-      || hook.trustStatus !== expected.trustStatus || hook.reviewable !== expected.reviewable) throw expired();
+    if (catalog.errorCount || !hook || !sameHookState(hook, expected)) throw expired();
     return hook;
   }
 
@@ -235,6 +263,16 @@ export class ConversationHookService {
     for (const [key, value] of map) if (performance.now() - value.capturedAt >= lifetimeMs) map.delete(key);
     if (reserve) trimOldestEntries(map, maximumSnapshots - 1);
   }
+}
+
+function needsTrust(hook: HookEntry): boolean {
+  return !hook.isManaged && (hook.trustStatus === "untrusted" || hook.trustStatus === "modified");
+}
+
+function sameHookState(hook: HookEntry, expected: HookEntry): boolean {
+  return hook.currentHash === expected.currentHash && hook.isManaged === expected.isManaged
+    && hook.enabled === expected.enabled && hook.trustStatus === expected.trustStatus
+    && hook.reviewable === expected.reviewable;
 }
 
 function sameContext(left: Context, right: Context): boolean {

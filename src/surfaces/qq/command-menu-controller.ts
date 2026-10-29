@@ -392,7 +392,8 @@ export class QqCommandMenuController {
     const buttons = hookCommandChoices(result.view).map(choice => {
       const entry = !result.view.detail && !result.view.updated
         ? result.view.entries.find(entry => entry.selector === choice.input) : undefined;
-      const label = entry ? `${entry.selector.split(".").at(-1)} ${entry.hook.eventName}` : choice.label;
+      const label = entry ? `${entry.selector.split(".").at(-1)} ${entry.hook.eventName}`
+        : choice.input === "trust all" ? "全部信任" : choice.label;
       return this.button(context, label,
         choice.input.startsWith("confirm ") ? { kind: "hook-confirm", token: choice.input.slice(8) } : { kind: "hook", input: choice.input });
     });
@@ -408,7 +409,7 @@ export class QqCommandMenuController {
       if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
       throw new UserFacingError("hooks.local-review-required", "Hook 详情超出完整展示预算");
     }
-    const content = ["核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。",
+    const content = [confirmation ? "核对上方信息后确认；停止、切换或重启后失效。" : "请选择下方操作。",
       ...(confirmation ? [`也可发送：/hooks ${confirmation.input}`] : []),
     ].join("\n\n");
     return { ...this.panel(context, { content, keyboard: { content: { rows } } }),

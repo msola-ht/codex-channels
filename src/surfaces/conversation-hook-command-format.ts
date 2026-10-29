@@ -5,39 +5,35 @@ export interface HookCommandChoice {
   input: string;
 }
 
-const hookActionLabels = { trust: "信任", enable: "启用", disable: "停用" } as const;
+const hookActionLabels = { trust: "信任", enable: "启用", disable: "停用", "trust-all": "全部信任" } as const;
 const hookTrustLabels = {
   managed: "受管（只读）",
   untrusted: "未信任",
   trusted: "已信任",
-  modified: "定义或插件内容已变化，需重新审查",
+  modified: "已变更，待信任",
 } as const;
 
 export function formatConversationHooks(view: HookCommandView, queryOnly = false): string {
   const lines = [
-    `Hooks · 第 ${view.page}/${view.pageCount} 页`,
-    `Workspace：${hookDisplayText(view.workspaceId)}`,
-    `Provider：${hookDisplayText(view.provider)}`,
-    `诊断：${view.warningCount} 项警告 · ${view.errorCount} 项错误`,
+    view.detail || view.bulkCount !== undefined || view.updated ? "Hooks" : `Hooks · ${view.page}/${view.pageCount}`,
+    `工作区：${hookDisplayText(view.workspaceId)} · 提供商：${hookDisplayText(view.provider)}`,
   ];
+  if (view.warningCount || view.errorCount) lines.push(`警告 ${view.warningCount} · 错误 ${view.errorCount}`);
+  const subject = view.bulkCount === undefined ? "该 Hook" : `${view.bulkCount} 个 Hook`;
   if (view.updated) {
     if (view.refreshFailedProviders?.length) {
-      lines.push(`该 Hook 的${hookActionLabels[view.updated]}设置已保存，刷新未确认。`,
-        `未确认刷新的 Provider：${view.refreshFailedProviders.map(provider => hookDisplayText(provider)).join("、")}`,
-        "请核对这些实例的连接与 Hook 状态；本次不会重复写入。");
+      lines.push(`已保存${subject}的${view.updated === "trust-all" ? "信任" : hookActionLabels[view.updated]}设置。`,
+        `刷新未确认：${view.refreshFailedProviders.map(provider => hookDisplayText(provider)).join("、")}。请用 /hooks 核对，不会重复写入。`);
     } else {
-      lines.push(`已${hookActionLabels[view.updated]}该 Hook。`);
+      lines.push(`已${view.updated === "trust-all" ? "信任" : hookActionLabels[view.updated]}${subject}。`);
     }
-  }
-  if (view.detail) {
+  } else if (view.detail) {
     const { hook } = view.detail;
     lines.push(
       "",
       `事件：${hookDisplayText(hook.eventName)}`,
       `匹配：${hook.matcher === null ? "全部" : hookDisplayText(hook.matcher)}`,
-      `处理器：${hook.handlerType}`,
-      `超时：${hook.timeoutSec} 秒`,
-      `异步：${hook.async === null ? "不适用" : hook.async ? "是" : "否"}`,
+      `处理器：${hook.handlerType} · 超时：${hook.timeoutSec} 秒 · 异步：${hook.async === null ? "不适用" : hook.async ? "是" : "否"}`,
       `附加上下文上限：${hook.additionalContextLimit === null ? "默认 2500 tokens" : hook.additionalContextLimit === 0 ? "关闭溢出" : `${hook.additionalContextLimit} tokens`}`,
       `${hook.handlerType === "command" ? "命令" : "处理目标"}：${hookDisplayText(hook.description) || "（无说明）"}`,
       `来源：${hookDisplayText(hook.source)}`,
@@ -45,24 +41,25 @@ export function formatConversationHooks(view: HookCommandView, queryOnly = false
       `状态：${hook.enabled ? "启用" : "停用"} · ${hookTrustLabels[hook.trustStatus]}`,
     );
     if (!hook.isManaged && !hook.reviewable) {
-      lines.push("当前 Hook 无法完整审查，不能在渠道中信任。请先在本机处理配置。");
+      lines.push("无法完整展示，逐项信任请在本机审查；也可返回列表选择全部信任。");
     }
+  } else if (view.bulkCount !== undefined) {
+    lines.push("", `信任当前工作区全部 ${view.bulkCount} 个待审核 Hook（跨分页，不含受管项）。`,
+      "不逐项审查，包括无法完整展示的项；保留启停状态。");
   } else {
     lines.push("", ...view.entries.map(({ selector, hook }) =>
       `${selector} · ${hookDisplayText(hook.eventName, 80)} · ${hook.handlerType} · ${hookDisplayText(hook.source, 80)} · ${hook.enabled ? "启用" : "停用"} · ${hookTrustLabels[hook.trustStatus]}`
     ));
     if (view.entries.length === 0) lines.push("当前页没有 Hook。");
   }
-  lines.push(
-    "",
-    "信任及启停会持久修改共享 Codex 用户目录中的 Hook 配置，影响使用该配置的其他 Provider 实例与会话。",
-    "信任只表示认可当前定义，不表示执行成功。普通 Hook 的配置哈希不覆盖脚本内容；插件 Hook 还核对插件内容指纹，但不覆盖全部外部依赖。",
-  );
   if (view.confirmation) {
     lines.push(
       "",
-      `待确认：${hookActionLabels[view.confirmation.action]}该 Hook。`,
-      "确认令牌五分钟内有效，仅可使用一次；配置或当前会话上下文变化后需重新预览。",
+      ...(view.confirmation.action === "trust-all" ? [] : [`确认${hookActionLabels[view.confirmation.action]}该 Hook？`]),
+      "将持久保存，影响共用配置的提供商和会话。",
+      ...(view.confirmation.action === "trust" || view.confirmation.action === "trust-all"
+        ? ["仅信任当前定义，变更后需重新信任；不代表执行成功。"] : []),
+      "确认码 5 分钟内有效，仅可用一次；配置或会话变化后失效。",
     );
   }
   lines.push("", ...(queryOnly ? [] : hookCommandChoices(view).map(choice => `${choice.label}：/hooks ${choice.input}`)));
@@ -71,10 +68,10 @@ export function formatConversationHooks(view: HookCommandView, queryOnly = false
 
 export function hookCommandChoices(view: HookCommandView): HookCommandChoice[] {
   if (view.updated) return [{ label: "刷新列表", input: `page ${view.page}` }];
-  if (view.confirmation && view.detail) {
+  if (view.confirmation) {
     return [
       { label: `确认${hookActionLabels[view.confirmation.action]}`, input: `confirm ${view.confirmation.token}` },
-      { label: "返回详情", input: view.detail.selector },
+      view.detail ? { label: "返回详情", input: view.detail.selector } : { label: "返回列表", input: "page 1" },
     ];
   }
   if (view.detail) {
@@ -88,6 +85,7 @@ export function hookCommandChoices(view: HookCommandView): HookCommandChoice[] {
     ...view.entries.map(({ selector, hook }) => ({ label: `查看 ${hookDisplayText(hook.eventName, 32)}`, input: selector })),
     ...(view.page > 1 ? [{ label: "上一页", input: `page ${view.page - 1}` }] : []),
     ...(view.page < view.pageCount ? [{ label: "下一页", input: `page ${view.page + 1}` }] : []),
+    { label: "全部信任", input: "trust all" },
     { label: "刷新", input: `page ${view.page}` },
   ];
 }
@@ -103,7 +101,7 @@ function hookDisplayText(value: string, limit = 500): string {
   return characters.length > limit ? `${characters.slice(0, limit - 1).join("")}…` : characters.join("");
 }
 
-/** Trust requires the platform's detail view to preserve every review field exactly. */
+/** Individual review requires the detail view to preserve every review field exactly. */
 export function canReviewConversationHook(hook: HookEntry, preservesText: (value: string) => boolean): boolean {
   const fields = [hook.eventName, hook.matcher ?? "", hook.description, hook.source, hook.sourcePath];
   return fields.every(value => hookDisplayText(value) === value

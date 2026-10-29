@@ -1,5 +1,5 @@
 export { ConversationEventCoordinator } from "./conversation-event-coordinator.js";
-export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandView, HookReviewPolicy, HookStartupSummary } from "./hook-port.js";
+export type { HookAction, HookWriteInput, HookEntry, HookCatalog, HookConfigPort, HookCommandView, HookReviewPolicy, HookStartupSummary } from "./hook-port.js";
 export { parseMcpOperation, parsePluginOperation } from "./conversation-command-parser.js";
 export {
   type AccountMetric,
