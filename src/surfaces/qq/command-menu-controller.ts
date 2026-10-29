@@ -49,6 +49,7 @@ interface Options {
   queryScope(target: ConversationTarget): string;
   allowed(target: ConversationTarget, actorId: string): boolean;
   beforeMutation(target: ConversationTarget, preserveRevert?: boolean): void;
+  sendIdleResume(target: ConversationTarget, threadId: string, assertCurrent: () => void): Promise<void>;
   signal: AbortSignal;
 }
 
@@ -57,7 +58,7 @@ type MenuAction =
   | { kind: "cloud-usage"; input: string }
   | { kind: "workspace"; id: string }
   | { kind: "model"; selection: ModelSelectionRequest }
-  | { kind: "resume" | "unarchive"; id: string }
+  | { kind: "resume" | "unarchive"; id: string; idleResume?: true }
   | { kind: "auto-review"; threadId: string; enabled: boolean }
   | { kind: "extension-query"; choice: QqExtensionChoice }
   | { kind: "hook"; input: string }
@@ -103,7 +104,7 @@ export class QqCommandMenuController {
     return this.panel(context, {
       content: "点击下方按钮恢复此会话。",
       keyboard: { content: { rows: [{ buttons: [
-        this.button(context, "恢复会话", { kind: "resume", id: threadId }),
+        this.button(context, "恢复会话", { kind: "resume", id: threadId, idleResume: true }),
       ] }] } },
     });
   }
@@ -264,6 +265,10 @@ export class QqCommandMenuController {
         if (result.kind !== "auto-review") throw unsupported();
         return this.autoReview(selection, result);
       }
+    }
+    if (action.kind === "resume" && action.idleResume) {
+      await this.options.sendIdleResume(selection.target, action.id, () => this.assertCurrent(selection));
+      this.assertCurrent(selection);
     }
     if (action.kind !== "model" || action.selection.kind === "model") {
       this.options.beforeMutation(selection.target, action.kind === "revert-confirm");

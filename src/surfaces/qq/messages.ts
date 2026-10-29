@@ -118,6 +118,14 @@ export class QqMessages implements SurfaceOutputPort {
       selectionScope: target => this.options.service.status(target).selectionScope,
       queryScope: target => this.extensionQueryScope(target),
       allowed: (target, actorId) => this.allowed(target, actorId),
+      sendIdleResume: async (target, threadId, assertCurrent) => {
+        const recipient = qqConversationRecipient(target.conversationId);
+        await this.outbox.deliver({ mode: "active", recipient, content: `/r ${threadId}` }, {
+          signal: this.lifetime.signal, presentation: { kind: "literal" },
+          beforeSend: () => { assertCurrent(); },
+          reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
+        }, async () => {});
+      },
       beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); this.management.cancel(target); this.menus.cancelManagement(target); if (!preserveRevert) this.menus.cancelRevert(target); this.cancelSources(target); this.interactions.cancelTarget(target); },
       signal: this.lifetime.signal,
     });

@@ -676,9 +676,34 @@ export class TelegramSurface {
         return;
       }
       this.idleResumeSelections.delete(token);
+      const original = this.commandReplies.get(context);
+      const scope = this.commandReplyScope(callbackTarget);
+      const assertScope = (): void => {
+        const current = this.commandReplyScope(callbackTarget);
+        if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
+          || current.threadId !== scope.threadId || current.selectionScope !== scope.selectionScope) {
+          throw new UserFacingError("command.authorization-changed", "恢复按钮所属会话已变化，请重新发送 /r 命令。");
+        }
+      };
       await context.answerCallbackQuery({ text: "正在恢复会话" });
-      if (this.stopping || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) return;
-      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId);
+      const assertActive = (): void => {
+        if (!original || original.signal.aborted || this.stopping || pending.expiresAt <= this.now()
+          || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) {
+          throw new UserFacingError("command.authorization-changed", "恢复按钮已失效，请使用通知中的 /r 命令。");
+        }
+      };
+      assertActive();
+      assertScope();
+      await this.outbox.runOrdered(callbackTarget.conversationId, signal => this.apiExecutor.call({
+        chatId: callbackTarget.conversationId, operation: "sendMessage", critical: true,
+      }, requestSignal => {
+        assertActive();
+        assertScope();
+        return context.reply(`/r ${pending.threadId}`, { disable_notification: true }, telegramAbortSignal(requestSignal));
+      }, signal));
+      assertActive();
+      assertScope();
+      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId, assertActive);
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "空闲恢复按钮清理失败"); }
       await this.renderCommandResult(context, result);
